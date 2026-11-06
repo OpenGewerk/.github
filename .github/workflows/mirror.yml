@@ -89,3 +89,37 @@ jobs:
             "refs/tags/*:refs/tags/*"
 
           echo "Spiegel aktualisiert: codeberg.org/${CODEBERG_REPO}"
+
+      # Codeberg (Forgejo) shows an organisation profile from README.md in a
+      # repository named .profile, GitHub from profile/README.md in this one.
+      # The deploy key of this repository is also registered for .profile on
+      # Codeberg, so no second secret is needed. Author, committer, dates and
+      # message come from the last commit that touched profile/README.md, so an
+      # unchanged profile yields the same commit and the push changes nothing.
+      - name: Profil der Organisation nach Codeberg pushen
+        env:
+          CODEBERG_REPO: ${{ secrets.CODEBERG_REPO }}
+        run: |
+          set -euo pipefail
+
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+
+          source_commit="$(git log -1 --format=%H -- profile/README.md)"
+          export GIT_AUTHOR_NAME="$(git log -1 --format=%an "$source_commit")"
+          export GIT_AUTHOR_EMAIL="$(git log -1 --format=%ae "$source_commit")"
+          export GIT_AUTHOR_DATE="$(git log -1 --format=%aI "$source_commit")"
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+
+          profile="$RUNNER_TEMP/profile"
+          git init --quiet --initial-branch=main "$profile"
+          cp profile/README.md "$profile/README.md"
+          git -C "$profile" add README.md
+          git -C "$profile" commit --quiet --no-gpg-sign \
+            --message "Profil aus OpenGewerk/.github@${source_commit}"
+
+          target="${CODEBERG_REPO%%/*}/.profile"
+          git -C "$profile" push --force "git@codeberg.org:${target}.git" main:main
+
+          echo "Profil aktualisiert: codeberg.org/${target}"
