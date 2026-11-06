@@ -1,25 +1,32 @@
-# Mirror to Codeberg (codeberg.org/OpenGewerk). GitHub stays the source of
-# truth.
+# Organisation profile on Codeberg (codeberg.org/OpenGewerk). GitHub stays the
+# source of truth.
 #
-# Destructive by design: --prune removes branches and tags on Codeberg that no
-# longer exist on GitHub, and --force overwrites commits pushed there directly.
+# Codeberg (Forgejo) shows an organisation profile from README.md in a
+# repository named .profile, GitHub from profile/README.md in this one. This
+# repository itself is not mirrored to Codeberg, only the profile is: the job
+# writes profile/README.md as README.md into .profile.
 #
-# Access is a deploy key registered for THIS repository only, not an account
-# token and not a user SSH key. Both of those carry account-wide write access,
-# so a single compromised repository would reach every Codeberg repository.
+# Author, committer, dates and message come from the last commit that touched
+# profile/README.md, so an unchanged profile yields the same commit and the
+# push changes nothing. --force overwrites anything committed there directly.
+#
+# Access is a deploy key registered for .profile on Codeberg only, not an
+# account token and not a user SSH key. Both of those carry account-wide write
+# access, so a single compromised repository would reach every Codeberg
+# repository.
 #
 # Setup: generate the key with `pass-cli item create ssh-key generate`, add the
-# public half under Repository -> Settings -> Deploy Keys with "Enable Write
-# Access" ticked, and pipe the private half into the CODEBERG_SSH_KEY secret
-# with `pass-cli item view ... --field private_key | gh secret set`.
+# public half under Repository -> Settings -> Deploy Keys of .profile with
+# "Enable Write Access" ticked, and pipe the private half into the
+# CODEBERG_SSH_KEY secret with
+# `pass-cli item view ... --field private_key | gh secret set`.
 
-name: Spiegel nach Codeberg
+name: Profil nach Codeberg
 
 on:
   push:
     branches: ["main"]
-    tags: ["**"]
-  delete:
+    paths: ["profile/README.md", ".github/workflows/mirror.yml"]
   workflow_dispatch:
 
 permissions:
@@ -32,8 +39,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  mirror:
-    name: Nach Codeberg pushen
+  profile:
+    name: Profil nach Codeberg pushen
     runs-on: ubuntu-latest
     if: github.repository_owner == 'OpenGewerk'
 
@@ -43,15 +50,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Branches und Tags nach Codeberg pushen
+      - name: README.md nach .profile pushen
         env:
           CODEBERG_SSH_KEY: ${{ secrets.CODEBERG_SSH_KEY }}
-          CODEBERG_REPO: ${{ secrets.CODEBERG_REPO }}
         run: |
           set -euo pipefail
 
-          if [ -z "${CODEBERG_SSH_KEY:-}" ] || [ -z "${CODEBERG_REPO:-}" ]; then
-            echo "::error::Die Secrets CODEBERG_SSH_KEY und CODEBERG_REPO fehlen."
+          if [ -z "${CODEBERG_SSH_KEY:-}" ]; then
+            echo "::error::Das Secret CODEBERG_SSH_KEY fehlt."
             exit 1
           fi
 
@@ -73,37 +79,6 @@ jobs:
 
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
 
-          git fetch --prune --prune-tags --tags origin
-
-          # Without this, the symbolic ref refs/remotes/origin/HEAD matches the
-          # refspec below and lands on Codeberg as a branch literally named
-          # "HEAD", which makes every ref name ambiguous there. Not
-          # `git update-ref -d`: that dereferences and would delete the default
-          # branch itself.
-          git remote set-head origin --delete || true
-
-          # refs/remotes/origin/* and not refs/heads/*: the checkout creates one
-          # local branch, every other branch exists only as a tracking ref.
-          git push --force --prune "git@codeberg.org:${CODEBERG_REPO}.git" \
-            "refs/remotes/origin/*:refs/heads/*" \
-            "refs/tags/*:refs/tags/*"
-
-          echo "Spiegel aktualisiert: codeberg.org/${CODEBERG_REPO}"
-
-      # Codeberg (Forgejo) shows an organisation profile from README.md in a
-      # repository named .profile, GitHub from profile/README.md in this one.
-      # The deploy key of this repository is also registered for .profile on
-      # Codeberg, so no second secret is needed. Author, committer, dates and
-      # message come from the last commit that touched profile/README.md, so an
-      # unchanged profile yields the same commit and the push changes nothing.
-      - name: Profil der Organisation nach Codeberg pushen
-        env:
-          CODEBERG_REPO: ${{ secrets.CODEBERG_REPO }}
-        run: |
-          set -euo pipefail
-
-          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-
           source_commit="$(git log -1 --format=%H -- profile/README.md)"
           export GIT_AUTHOR_NAME="$(git log -1 --format=%an "$source_commit")"
           export GIT_AUTHOR_EMAIL="$(git log -1 --format=%ae "$source_commit")"
@@ -119,7 +94,7 @@ jobs:
           git -C "$profile" commit --quiet --no-gpg-sign \
             --message "Profil aus OpenGewerk/.github@${source_commit}"
 
-          target="${CODEBERG_REPO%%/*}/.profile"
+          target="${GITHUB_REPOSITORY_OWNER}/.profile"
           git -C "$profile" push --force "git@codeberg.org:${target}.git" main:main
 
           echo "Profil aktualisiert: codeberg.org/${target}"
