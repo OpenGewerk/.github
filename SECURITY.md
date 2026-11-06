@@ -10,11 +10,11 @@ Danke, dass du dir die Mühe machst. Melde eine Sicherheitslücke bitte **nicht*
 
 Direktlinks:
 
-- [opengewerk](https://github.com/opengewerk/opengewerk/security/advisories/new)
-- [opengewerk-haustechnik](https://github.com/opengewerk/opengewerk-haustechnik/security/advisories/new)
-- [opengewerk-kanzlei](https://github.com/opengewerk/opengewerk-kanzlei/security/advisories/new)
-- [opengewerk-api-spec](https://github.com/opengewerk/opengewerk-api-spec/security/advisories/new)
-- [opengewerk-website](https://github.com/opengewerk/opengewerk-website/security/advisories/new)
+- [opengewerk](https://github.com/OpenGewerk/opengewerk/security/advisories/new)
+- [opengewerk-haustechnik](https://github.com/OpenGewerk/opengewerk-haustechnik/security/advisories/new)
+- [opengewerk-kanzlei](https://github.com/OpenGewerk/opengewerk-kanzlei/security/advisories/new)
+- [opengewerk-api-spec](https://github.com/OpenGewerk/opengewerk-api-spec/security/advisories/new)
+- [opengewerk-website](https://github.com/OpenGewerk/opengewerk-website/security/advisories/new)
 
 Auf diesem Weg sind Meldung und Diskussion privat, bis eine Behebung vorliegt. Eine eigene E-Mail-Adresse für Sicherheitsmeldungen gibt es bewusst nicht, weil ein Postfach ohne verlässliche Bearbeitung schlechter ist als gar keines.
 
@@ -28,7 +28,7 @@ Die Korrektur geht sofort nach der Behebung als neues Release von `main` hinaus,
 
 **OpenGewerk Haustechnik, `opengewerk-haustechnik`,** steht am Anfang ihres Baus und hat noch keine Releases. Unterstützt wird der Stand auf `main`. Sobald ihre erste Fassung erscheint, gilt für sie dieselbe Regel wie für die Handwerkersoftware.
 
-**Das gemeinsame Fundament.** Mandantentrennung, Anmeldung, Rechte, Abgleich und Audit-Log liegen im Repository `opengewerk` in eigenen Paketen, und die Haustechnik bindet einen festen Stand davon ein ([ADR 0010](https://github.com/opengewerk/opengewerk/blob/main/docs/adr/0010-fundament-als-pakete.md)). Eine Sicherheitskorrektur dort erscheint als Fassung der Handwerkersoftware. Jede Anwendung, die das Fundament einbindet, hebt danach ihren Stand an und veröffentlicht ihrerseits, und das Advisory nennt alle betroffenen Anwendungen. Für jede von ihnen gilt die Korrektur erst als ausgeliefert, wenn ihre eigene Fassung sie enthält.
+**Das gemeinsame Fundament.** Mandantentrennung, Anmeldung, Rechte, Abgleich und Audit-Log liegen im Repository `opengewerk` in eigenen Paketen, und die Haustechnik bindet einen festen Stand davon ein ([ADR 0010](https://github.com/OpenGewerk/opengewerk/blob/main/docs/adr/0010-fundament-als-pakete.md)). Eine Sicherheitskorrektur dort erscheint als Fassung der Handwerkersoftware. Jede Anwendung, die das Fundament einbindet, hebt danach ihren Stand an und veröffentlicht ihrerseits, und das Advisory nennt alle betroffenen Anwendungen. Für jede von ihnen gilt die Korrektur erst als ausgeliefert, wenn ihre eigene Fassung sie enthält.
 
 **Der Kanzlei-Hub und die Website** haben keine Releases. Unterstützt wird der Stand auf `main`, und die Website ist mit jedem Merge ausgeliefert.
 
@@ -40,7 +40,7 @@ Ist die Lücke bestätigt und behoben, wird das Advisory veröffentlicht. Es nen
 
 ## Wie Betreiber davon erfahren
 
-An drei Stellen: im veröffentlichten Advisory, auf der Release-Seite der Fassung mit der Korrektur, die mit einem Hinweis darauf beginnt, und im Kanal `#ankündigungen` des [Discord-Servers](https://discord.gg/NRrEvbQdxz). Wer eine Instanz betreibt, abonniert am besten die Releases von [opengewerk](https://github.com/opengewerk/opengewerk) auf GitHub (Watch, Custom, Releases). Dann kommt jede neue Fassung als Benachrichtigung, eine Korrektur eingeschlossen.
+An drei Stellen: im veröffentlichten Advisory, auf der Release-Seite der Fassung mit der Korrektur, die mit einem Hinweis darauf beginnt, und im Kanal `#ankündigungen` des [Discord-Servers](https://discord.gg/NRrEvbQdxz). Wer eine Instanz betreibt, abonniert am besten die Releases von [opengewerk](https://github.com/OpenGewerk/opengewerk) auf GitHub (Watch, Custom, Releases). Dann kommt jede neue Fassung als Benachrichtigung, eine Korrektur eingeschlossen.
 
 ## Was in den Geltungsbereich fällt
 
