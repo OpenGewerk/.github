@@ -72,7 +72,7 @@ Die Gemeinschaftsleitung wird sich bei der Bestimmung der Konsequenzen für jede
 
 Das Projekt veröffentlicht bewusst keine eigene E-Mail-Adresse. Meldungen laufen über GitHub:
 
-1. **Vertraulich an die Verantwortlichen der Organisation:** über ein privates Sicherheitsgutachten im Repository [`opengewerk/.github`](https://github.com/opengewerk/.github/security/advisories/new). Dieser Weg ist ursprünglich für Sicherheitslücken gedacht, er ist aber der einzige nicht öffentliche Kanal, den GitHub bereitstellt, und er erreicht ausschließlich die Verantwortlichen der Organisation.
+1. **Vertraulich an die Verantwortlichen der Organisation:** über ein privates Sicherheitsgutachten im Repository [`opengewerk/.github`](https://github.com/OpenGewerk/.github/security/advisories/new). Dieser Weg ist ursprünglich für Sicherheitslücken gedacht, er ist aber der einzige nicht öffentliche Kanal, den GitHub bereitstellt, und er erreicht ausschließlich die Verantwortlichen der Organisation.
 2. **An GitHub selbst:** über das Formular [Missbrauch melden](https://github.com/contact/report-abuse), falls eine Meldung an das Projekt selbst nicht in Frage kommt.
 
 Wer unsicher ist, nimmt Weg 1. Jede Meldung wird vertraulich behandelt.

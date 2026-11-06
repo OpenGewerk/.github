@@ -18,11 +18,11 @@ Die Handwerkersoftware läuft und steht vor dem ersten Pilotbetrieb: Kunden, Obj
 
 Welches Repository das richtige ist:
 
-- [`opengewerk`](https://github.com/opengewerk/opengewerk) für alles, was der Handwerksbetrieb benutzt.
-- [`opengewerk-haustechnik`](https://github.com/opengewerk/opengewerk-haustechnik) für alles, was der Betreiber eines Gebäudes und seine Haustechnik benutzen.
-- [`opengewerk-kanzlei`](https://github.com/opengewerk/opengewerk-kanzlei) für alles, was die Steuerberaterkanzlei benutzt.
-- [`opengewerk-api-spec`](https://github.com/opengewerk/opengewerk-api-spec) für alles, was zwischen beiden über die Leitung geht.
-- [`opengewerk-website`](https://github.com/opengewerk/opengewerk-website) für die Seite unter opengewerk.de.
+- [`opengewerk`](https://github.com/OpenGewerk/opengewerk) für alles, was der Handwerksbetrieb benutzt.
+- [`opengewerk-haustechnik`](https://github.com/OpenGewerk/opengewerk-haustechnik) für alles, was der Betreiber eines Gebäudes und seine Haustechnik benutzen.
+- [`opengewerk-kanzlei`](https://github.com/OpenGewerk/opengewerk-kanzlei) für alles, was die Steuerberaterkanzlei benutzt.
+- [`opengewerk-api-spec`](https://github.com/OpenGewerk/opengewerk-api-spec) für alles, was zwischen beiden über die Leitung geht.
+- [`opengewerk-website`](https://github.com/OpenGewerk/opengewerk-website) für die Seite unter opengewerk.de.
 
 Im Zweifel reicht ein Issue im Hauptrepository, es wird dann verschoben.
 
@@ -89,12 +89,12 @@ Die Konzepte unter `docs/konzept/` sind die verbindliche Quelle für den Funktio
 
 ## Formulare und Grenzwerte für ein Gewerk
 
-Prüfprotokolle und andere Formulare sind Dateien, kein Code. Sie liegen im Paket ihres Gewerks unter `packages/gewerke/<gewerk>/` im Repository [`opengewerk`](https://github.com/opengewerk/opengewerk): die Definition als JSON unter `formulare/`, die Grenzwerte als Regeln mit Fundstelle unter `regeln/`, beide im `manifest.json` des Pakets eingetragen. Das erste Paket ist Elektro und PV mit dem Prüfprotokoll nach DIN VDE 0100-600. Wie eine Definition aufgebaut ist, zeigt dessen Datei, und die Feldarten beschreibt das Kapitel zur Formular-Engine in der [README](https://github.com/opengewerk/opengewerk/blob/main/README.md).
+Prüfprotokolle und andere Formulare sind Dateien, kein Code. Sie liegen im Paket ihres Gewerks unter `packages/gewerke/<gewerk>/` im Repository [`opengewerk`](https://github.com/OpenGewerk/opengewerk): die Definition als JSON unter `formulare/`, die Grenzwerte als Regeln mit Fundstelle unter `regeln/`, beide im `manifest.json` des Pakets eingetragen. Das erste Paket ist Elektro und PV mit dem Prüfprotokoll nach DIN VDE 0100-600. Wie eine Definition aufgebaut ist, zeigt dessen Datei, und die Feldarten beschreibt das Kapitel zur Formular-Engine in der [README](https://github.com/OpenGewerk/opengewerk/blob/main/README.md).
 
 - Eine gemergte Definition wird nicht mehr geändert. Wer sie verbessert, legt eine neue Datei mit der nächsten Fassung an (`<schlüssel>.v2.json`), denn ein ausgefülltes Formular wird mit der Fassung gelesen, in der es entstanden ist.
 - Ein Grenzwert steht nie im Formular, sondern als Regel mit Gültigkeitsbeginn und Fundstelle, also Norm, Ausgabe und Abschnitt. Ein Wert ohne Fundstelle wird nicht übernommen.
 - Die Tests des Pakets prüfen, was ohne Code schiefgehen kann: ein Schlüssel zweimal, eine Auswahl ohne Möglichkeiten, eine Einheit oder Regel, die es nicht gibt. `pnpm run test` im Paket genügt.
-- Grenzwerte brauchen eine fachkundige Abnahme. Wer beruflich prüft, ist dafür besonders willkommen; die offenen Fragen stehen in [#31](https://github.com/opengewerk/opengewerk/issues/31).
+- Grenzwerte brauchen eine fachkundige Abnahme. Wer beruflich prüft, ist dafür besonders willkommen; die offenen Fragen stehen in [#31](https://github.com/OpenGewerk/opengewerk/issues/31).
 
 ## Architekturentscheidungen
 
