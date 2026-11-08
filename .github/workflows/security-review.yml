@@ -1,8 +1,10 @@
 name: Security-Review
 
-# The security review of a pull request, for every repository of the
-# organisation, called from .github/workflows/security-review.yml in each
-# repository on both pull_request and pull_request_target. It replaces the
+# The review of a pull request, on security and, since 08.11.2026, on
+# correctness (what the code promises against what it does), for every
+# repository of the organisation, called from
+# .github/workflows/security-review.yml in each repository on both
+# pull_request and pull_request_target. It replaces the
 # reviewer that ran on a maintainer's machine until 10.10.2026.
 #
 # Each caller pins a commit of this file, so a change here reaches a
@@ -687,7 +689,7 @@ jobs:
           DATABASE: ${{ inputs.database }}
         run: |
           cat > "$RUNNER_TEMP/prompt-template.md" <<'PROMPT'
-          # PR-Security-Review (automatischer Lauf in GitHub Actions)
+          # PR-Review: Sicherheit und Korrektheit (automatischer Lauf in GitHub Actions)
 
           Repo: {{REPO}} | PR: #{{PR}} | Head: {{SHA}} | Basis: {{BASE_REF}} ({{BASE_SHA}})
 
@@ -695,7 +697,8 @@ jobs:
 
           ## Auftrag
 
-          1. Reviewe die Änderungen des PRs #{{PR}} als Security-Review. Der PR-Head ist in deinem
+          1. Reviewe die Änderungen des PRs #{{PR}} in zwei Teilen: als Security-Review (Teil 1) und
+             auf Korrektheit (Teil 2, siehe unten). Der PR-Head ist in deinem
              Arbeitsverzeichnis ausgecheckt. Den Diff gegen die Basis findest du in
              `.security-review/diff.patch`, die Liste der geänderten Dateien in
              `.security-review/changed-files.txt`. Ändert der PR den angehefteten Commit dieses
@@ -716,8 +719,9 @@ jobs:
              Datei an; ein Werkzeug zum Schreiben hast du nicht, und gelesen wird nur innerhalb des
              Arbeitsverzeichnisses.
           3. Die vorletzte Zeile deiner Antwort ist genau eine dieser beiden:
-             `REVIEW_RESULT: clean` (kein Finding, keine offenen `open_proof_gap`/`needs_follow_up`)
-             oder `REVIEW_RESULT: findings` (mindestens ein Finding oder ein offener Punkt).
+             `REVIEW_RESULT: clean` (kein Finding in Teil 1 oder Teil 2, keine offenen
+             `open_proof_gap`/`needs_follow_up`) oder `REVIEW_RESULT: findings` (mindestens ein
+             Finding in einem der beiden Teile oder ein offener Punkt).
              Die letzte Zeile ist `REVIEW_COMPLETE`. Der Workflow setzt danach den Commit-Status
              `PR-Security-Review`: `clean` wird grün, alles andere rot.
           4. Der Report ist öffentlich. Schwachstellen in Code, den dieser PR weder einführt noch
@@ -768,11 +772,58 @@ jobs:
           `withinAreas()`); ein Nachweis wird nie geändert oder gelöscht; ein Recht ändert oder
           löscht keinen Nachweis, ersetzt keine Unterschrift und überspringt keine Abnahme;
           Security-Header und CSP werden nicht doppelt gesetzt; keine Secrets im Repository.
+          Was das Fundament (`packages/platform`) neu anbietet, braucht jede Anwendung darauf;
+          fehlt die Einbindung in einer, nennst du es.
+          
+          **Familien, die frühere Audits in diesem Code gefunden haben,** prüfst du an jeder
+          Stelle, die der Diff berührt: Prüfen, dann schreiben ohne Sperre oder Bedingung im
+          Schreiben (Beleg, Unterschrift, Abwesenheit, Abgleich vom Gerät); Felder, die ein Abgleich
+          zweimal nennt oder nach der Prüfung ändert; Aufwand, der mit einer Eingabe wächst
+          (reguläre Ausdrücke über eine Zeile, verschachtelte Schleifen, Datumsbereiche, Archive,
+          Tabellen, Kopien je Datensatz) ohne Grenze vor der Arbeit; Zwischenspeicher im Browser
+          oder auf dem Gerät, deren Schlüssel Konto oder Mandant nicht enthält; HTML aus Text ohne
+          Escaping, auch im Druck; Post, die beim Versand liest, was sich seit dem Einreihen
+          geändert hat.
+          
+          ## Teil 2: Korrektheit
+          
+          Neben Lücken suchst du Fehler, die ein sorgfältiger Mensch im Review fände: Der Code tut
+          nicht, was der PR, ein Kommentar, ein Text der Oberfläche, das CHANGELOG, eine Doku oder
+          ein Test von ihm sagt, oder er bricht Verhalten, das vorher galt. Ein solcher Befund
+          braucht keinen PoC, aber ein konkretes Szenario: Zustand oder Eingabe, der Weg durch den
+          Code mit Datei und Zeile, das falsche Ergebnis. Ein bloßes "könnte" ist kein Befund, und
+          Stil, Benennung oder Geschmack sind es auch nicht. Prüfe mindestens:
+          
+          - **Zusagen nachrechnen.** Jede Zusage, die der Diff schreibt oder berührt (eine Frist,
+            eine Grenze, "spätestens", "nie", "immer", "nur", eine Zahl), rechnest du am Mechanismus
+            nach, der sie halten soll, und zwar für den ungünstigsten Fall. Lies dafür den Helfer,
+            nicht nur seinen Namen: ein wiederholter Lauf zählt seine Pause oft ab dem Ende des
+            vorigen, ein Lauf kann scheitern oder länger brauchen, ein Neustart setzt Zeitgeber
+            zurück, eine Grenze lässt sich an einer anderen Stelle umgehen.
+          - **Varianten vergleichen.** Hat ein Bildschirm, eine Route oder eine Funktion mehrere
+            Fassungen (Telefon und Schreibtisch, Reiter und Spalten, Tabelle und Kästen, Büro und
+            Baustelle, beide Anwendungen auf dem Fundament), dann zeigt jede dieselben Daten und
+            bietet dieselben Handlungen. Was der Diff in einer Fassung zeigt, ergänzt oder
+            verschiebt, suchst du in jeder anderen; eine Spalte der Tabelle fehlt nicht im Kasten.
+          - **Ränder.** Leer, ein Element, eine Grenze genau erreicht, `null`, ein doppelter
+            Schlüssel, ein Wert aus einer älteren Fassung, ein abgebrochener Lauf.
+          - **Tests.** Würde der Test des PRs rot, wenn der Fehler drin wäre, den er abwehren soll?
+            Prüft er das Verhalten, das der PR zusagt, oder nur, dass etwas da ist?
+          
+          Fehler in Code, den der PR nicht berührt, nennst du kurz unter "Nebenbei gefunden"; sie
+          machen das Ergebnis nicht rot. Eine Schwachstelle gehört nie dorthin, sondern in den
+          privaten Block aus Punkt 4.
+          
+          **Gegenprobe deiner Entwarnungen:** Bevor du einen Bereich `no_issue_found` oder
+          `ruled_out` nennst, schreibst du im Ledger dazu, welchen Fall du dagegen versucht hast.
+          "Passt zum Code" ohne diesen Fall gilt nicht als geprüft.
 
-          **Report-Format pro Finding** (an geänderte Zeilen verankert):
-          Titel, Severity · CWE · CVSS, Confidence mit Begründung, TL;DR, Location (file:line),
-          Impact (demonstriert), Reproduction/Proof (PoC + Kontroll-Request), Counterevidence,
-          Suggested change (nur bei bestandenen Gates), Fix verification.
+          **Report-Format pro Finding** (an geänderte Zeilen verankert), in zwei Abschnitten
+          "Sicherheit" und "Korrektheit". Sicherheit: Titel, Severity · CWE · CVSS, Confidence mit
+          Begründung, TL;DR, Location (file:line), Impact (demonstriert), Reproduction/Proof (PoC +
+          Kontroll-Request), Counterevidence, Suggested change (nur bei bestandenen Gates), Fix
+          verification. Korrektheit: Titel, Location (file:line), Szenario (Zustand, Weg, falsches
+          Ergebnis), was stattdessen gelten müsste, Vorschlag.
           Ohne Findings: Executive Summary plus welche Bereiche reviewt und clean sind,
           Coverage-Ledger (`reported`/`ruled_out`/`needs_follow_up`/`no_issue_found`), und offen
           deklarieren, was static-only blieb und warum.
