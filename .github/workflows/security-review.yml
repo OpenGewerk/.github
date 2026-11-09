@@ -21,8 +21,10 @@ name: Security-Review
 #
 # Two modes, each on its own trigger; the run of the other trigger ends after
 # its first job:
-# - A pull request from a branch of the repository itself, opened by a member,
-#   is reviewed on pull_request with a shell. The shell runs in the sandbox of
+# - A pull request from a branch of the repository itself, opened by a member
+#   or by the coding agent of CodeRabbit, which works on tasks a maintainer
+#   starts and which the organisation trusts like a member, is reviewed on
+#   pull_request with a shell. The shell runs in the sandbox of
 #   Claude Code: a process namespace of its own, without the variables that
 #   request an identity token, without the token file, without sudo and
 #   Docker, writing only in the checkout and reaching nothing but the npm
@@ -33,12 +35,18 @@ name: Security-Review
 #   inside that sandbox, for the length of one command; none runs beside it.
 #   The organisation variable SECURITY_REVIEW_DATABASE, set to "aus",
 #   switches that off for every repository without a pull request.
-# - Anything else (a fork, an author outside the organisation, a bot) is
-#   reviewed by reading alone on pull_request_target, whose definition comes
-#   from main: no shell, nothing of the pull request is installed or run. Such
-#   a job runs in the environment security-review-extern, which each
+# - Anything else (a fork, an author outside the organisation, any other bot,
+#   Dependabot among them) is reviewed by reading alone on
+#   pull_request_target, whose definition comes from main: no shell, nothing
+#   of the pull request is installed or run. Such a job runs in the
+#   environment security-review-extern, which each
 #   repository protects with a maintainer as required reviewer, so that no
-#   one outside spends the budget of the review.
+#   one outside spends the budget of the review. It has no bubblewrap and
+#   needs none: the agent starts no subprocess that the variable
+#   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would guard (no Bash, no hooks, no MCP),
+#   so it is set for the review with a shell only. Set without bubblewrap it
+#   stopped Claude Code before its first answer, and from the start until
+#   09.11.2026 no review from outside got a report.
 # In both, the agent reads only inside the checkout and writes nothing: the
 # report is its answer, not a file something in the pull request could
 # overwrite. Settings, hooks, skills, MCP servers and CLAUDE.md of the
@@ -74,7 +82,7 @@ on:
 permissions: {}
 
 env:
-  CLAUDE_CODE_VERSION: 2.1.296
+  CLAUDE_CODE_VERSION: 2.1.321
   POSTGRES_VERSION: 18
   # The signing key of apt.postgresql.org.
   POSTGRES_KEY: B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
@@ -96,13 +104,28 @@ jobs:
         env:
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          AUTHOR_ID: ${{ github.event.pull_request.user.id }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        # The bot is trusted by its login and its account id together: the
+        # login of an app cannot be taken by a user, and the id stays the same
+        # if an app is ever renamed. Its branch must be one of the repository
+        # itself, as a member's must. Dependabot stays outside: whether a run
+        # it starts gets the variables of the sign-in is not settled, and what
+        # it brings in is packages of others, which the review with a shell
+        # would install.
         run: |
           trusted=false
-          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] && [ "$AUTHOR_TYPE" = "User" ]; then
-            case "$ASSOCIATION" in
-              OWNER|MEMBER|COLLABORATOR) trusted=true ;;
-            esac
+          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            if [ "$AUTHOR_TYPE" = "User" ]; then
+              case "$ASSOCIATION" in
+                OWNER|MEMBER|COLLABORATOR) trusted=true ;;
+              esac
+            elif [ "$AUTHOR_TYPE" = "Bot" ]; then
+              case "$AUTHOR_LOGIN:$AUTHOR_ID" in
+                'coderabbitai[bot]:136622811') trusted=true ;;
+              esac
+            fi
           fi
           handles=false
           if [ "$trusted" = "true" ] && [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
@@ -114,6 +137,8 @@ jobs:
           echo "handles=$handles" >> "$GITHUB_OUTPUT"
           if [ "$handles" = "false" ]; then
             echo "Diesen PR prüft der Lauf des anderen Auslösers."
+          elif [ "$trusted" = "true" ] && [ "$AUTHOR_TYPE" = "Bot" ]; then
+            echo "Review mit Shell in der Sandbox: PR aus dem Repository, Autor $AUTHOR_LOGIN."
           elif [ "$trusted" = "true" ]; then
             echo "Review mit Shell in der Sandbox: PR aus dem Repository, Autor $ASSOCIATION."
           else
@@ -963,11 +988,21 @@ jobs:
             settings='{"permissions": {"blockReadsOutsideWorkingDirectories": true}}'
           fi
 
+          # The scrub needs bubblewrap, which only the review with a shell installs
+          # ("Sandbox vorbereiten"). Without a shell, hooks or MCP servers the review by
+          # reading alone starts nothing it would guard; set there anyway, it ended
+          # Claude Code before its first answer.
+          if [ "$TRUSTED" = "true" ]; then
+            scrub=1
+          else
+            scrub=0
+          fi
+
           # Arguments are NAME=VALUE pairs for the environment of this run.
           run_review() {
             env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
               ANTHROPIC_IDENTITY_TOKEN_FILE="$token_file" \
-              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 \
+              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB="$scrub" \
               COREPACK_HOME="$cache/corepack" \
               NODE_USE_ENV_PROXY=1 \
               PATH="$GITHUB_WORKSPACE/pr/.security-review/bin:$PATH" \
