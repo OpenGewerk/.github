@@ -116,10 +116,17 @@ jobs:
         # The bot is trusted by its login and its account id together: the
         # login of an app cannot be taken by a user, and the id stays the same
         # if an app is ever renamed. Its branch must be one of the repository
-        # itself, as a member's must. Dependabot stays outside: whether a run
-        # it starts gets the variables of the sign-in is not settled, and what
-        # it brings in is packages of others, which the review with a shell
-        # would install.
+        # itself, as a member's must. Every command of CodeRabbit that changes
+        # code, commits or opens a pull request (unit tests, docstrings, fix
+        # comments, fix-ci, autofix, merge conflicts, local commit, simplify,
+        # recipes, configuration) needs write access to the repository of the
+        # one who asks, by its reference of review commands; the coding agent
+        # is started from its dashboard by members. A pull request of it with
+        # code from a fork is one a maintainer asked for, as if they had pushed
+        # that code to a branch themselves. Dependabot stays outside: whether
+        # a run it starts gets the variables of the sign-in is not settled, and
+        # what it brings in is packages of others, which the review with a
+        # shell would install.
         run: |
           trusted=false
           if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
@@ -953,8 +960,10 @@ jobs:
       # read the proxy variables by itself: NODE_USE_ENV_PROXY makes Node do
       # it, and means nothing outside the sandbox, where none is set.
       # --safe-mode and --setting-sources user
-      # load nothing of the checkout; dontAsk turns down every tool not
-      # allowed instead of asking.
+      # load nothing of the checkout; --tools offers the allowed tools and no
+      # other, and dontAsk turns down whatever would ask. With the scrub on,
+      # Claude Code sets the mode back to default; nothing asks there either,
+      # since every tool on offer is allowed.
       - name: Review mit Claude Code
         run: |
           token_file="$RUNNER_TEMP/anthropic-identity-token"
