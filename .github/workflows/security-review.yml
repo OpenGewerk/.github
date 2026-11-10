@@ -201,6 +201,16 @@ jobs:
     steps:
       # Without the token in the git configuration: the agent works in this
       # folder and must find no credential there.
+      #
+      # Since v7, actions/checkout refuses the head of a fork on
+      # pull_request_target unless allow-unsafe-pr-checkout is set, and without
+      # it a pull request from a fork never got a report. It is set only on the
+      # read-only path and only for a fork. That path never runs code from this
+      # folder: no install, no build, no submodules, git only fetches and diffs
+      # with the configuration checkout writes, and Claude Code starts with
+      # --safe-mode, --setting-sources user and --strict-mcp-config, offered
+      # only Read, Grep and Glob, so settings, hooks, skills and MCP servers of
+      # the fork are never loaded. The maintainer accepted this on 10.11.2026.
       - name: Head des Pull Requests auschecken
         uses: actions/checkout@v7
         with:
@@ -210,6 +220,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           submodules: ${{ needs.mode.outputs.trusted == 'true' }}
+          allow-unsafe-pr-checkout: ${{ needs.mode.outputs.trusted != 'true' && github.event.pull_request.head.repo.full_name != github.repository }}
 
       - name: Diff gegen die Basis festhalten
         env:
