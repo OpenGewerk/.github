@@ -1369,7 +1369,16 @@ jobs:
                   # A block found here never goes without an alert: any other
                   # form becomes one entry that says so.
                   if isinstance(entries, list) and all(isinstance(entry, dict) for entry in entries):
-                      private = entries
+                      # Fields jq joins as text are text, so an odd entry does
+                      # not stop the upload of every other one.
+                      private = [{
+                          **entry,
+                          'file': entry['file'] if isinstance(entry.get('file'), str) else '',
+                          'title': entry['title'] if isinstance(entry.get('title'), str) else str(entry.get('title') or 'Befund'),
+                          'severity': entry['severity'] if entry.get('severity') in ('high', 'medium', 'low') else 'medium',
+                          'description': entry['description'] if isinstance(entry.get('description'), str)
+                          else str(entry.get('description') or '')[:4000],
+                      } for entry in entries]
                   else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
                                   'severity': 'medium', 'description': block[:4000]}]
