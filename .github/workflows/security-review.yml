@@ -1327,35 +1327,93 @@ jobs:
                       answer = event if event.get('subtype') == 'success' and not event.get('is_error') else None
 
           report = (answer or {}).get('result') or ''
-          private = []
-          block = re.search(r'<!--\s*PRIVATE-FINDINGS\s*(.*?)\s*PRIVATE-FINDINGS\s*-->', report, re.S)
-          if block:
-              report = report[:block.start()] + report[block.end():]
-              try:
-                  found = json.loads(block.group(1))
-                  private = [entry for entry in found if isinstance(entry, dict)]
-              except json.JSONDecodeError:
-                  private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
-                              'severity': 'medium', 'description': block.group(1)[:4000]}]
-          # Anything else that looks like the start of such a block stays out
-          # of the public report as well.
-          report = re.sub(r'<!--\s*PRIVATE-FINDINGS.*', '', report, flags=re.S) if 'PRIVATE-FINDINGS' in report else report
-
-          result = 'missing'
-          if 'REVIEW_COMPLETE' in report and len(report) >= 500:
-              if re.search(r'^\s*REVIEW_RESULT:\s*clean\s*$', report, re.M):
-                  result = 'clean'
-              elif re.search(r'^\s*REVIEW_RESULT:\s*findings\s*$', report, re.M):
-                  result = 'findings'
-              else:
+          lines = report.strip().split('\n')
+          # Only the end of the answer counts, where the prompt puts it: the
+          # last line REVIEW_COMPLETE, the one before it the result, right
+          # above them the block of private findings, if there is one; blank
+          # lines between them do not count. A result line or a block further
+          # up may be quoted from the pull request and decides nothing; a
+          # marker of such a block there leaves the result no better than
+          # unclear.
+          marker = r'<!--\s*PRIVATE-FINDINGS'
+          filled = [index for index, line in enumerate(lines) if line.strip()]
+          result, private, body, closing_lines = 'missing', [], report, []
+          if filled and lines[filled[-1]].strip() == 'REVIEW_COMPLETE':
+              found = None
+              if len(filled) >= 2:
+                  found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[filled[-2]].strip())
+              result = found.group(1) if found else 'unclear'
+              # Not a result line, the line before REVIEW_COMPLETE belongs to
+              # the report and goes through the same filter as the rest.
+              closing_lines = [found.group(0), 'REVIEW_COMPLETE'] if found else ['REVIEW_COMPLETE']
+              body = '\n'.join(lines[:filled[-2] if found else filled[-1]]).rstrip()
+              # The block starts at the start of a line: a JSON string holds no
+              # raw line break, so a marker there is never one a description
+              # quotes.
+              heads = [match.start() for match in re.finditer(r'(?m)^[ \t]*' + marker, body)]
+              block = None
+              if heads:
+                  # The end is checked anchored, so no run of blanks makes the
+                  # match backtrack.
+                  tail = re.sub(r'\A[ \t]*' + marker, '', body[heads[-1]:], count=1)
+                  closing = re.search(r'PRIVATE-FINDINGS\s*-->\Z', tail)
+                  block = tail[:closing.start()].strip() if closing else None
+              if block is not None:
+                  body = body[:heads[-1]].rstrip()
+                  try:
+                      entries = json.loads(block)
+                  except (ValueError, RecursionError):
+                      # JSONDecodeError is a ValueError; so is an integer past
+                      # the digit limit, and deep nesting ends in recursion.
+                      entries = None
+                  entries = [entries] if isinstance(entries, dict) else entries
+                  # A block found here never goes without an alert: any other
+                  # form becomes one entry that says so.
+                  if isinstance(entries, list) and all(isinstance(entry, dict) for entry in entries):
+                      # Fields jq joins as text are text, so an odd entry does
+                      # not stop the upload of every other one.
+                      private = [{
+                          **entry,
+                          'file': entry['file'] if isinstance(entry.get('file'), str) else '',
+                          'title': entry['title'] if isinstance(entry.get('title'), str) else str(entry.get('title') or 'Befund'),
+                          'severity': entry['severity'] if entry.get('severity') in ('high', 'medium', 'low') else 'medium',
+                          'description': entry['description'] if isinstance(entry.get('description'), str)
+                          else str(entry.get('description') or '')[:4000],
+                      } for entry in entries]
+                  else:
+                      private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
+                                  'severity': 'medium', 'description': block[offset:offset + 4000]}
+                                 for offset in range(0, max(len(block), 1), 4000)]
+          # Every marker left, further up or in an answer without its end: the
+          # public report ends before the first of them, whatever its strings
+          # hold. What each holds goes to a private alert of its own, marked
+          # unchecked: it may be quoted from the pull request, but a finding
+          # of the agent is never lost on the way. The log counts them.
+          leftover = list(re.finditer(marker, body))
+          dropped = len(leftover)
+          if dropped:
+              # Everything the public report loses goes private, in full and
+              # in pieces of 4000 characters.
+              cut = body[leftover[0].start():].strip()
+              for offset in range(0, len(cut), 4000):
+                  private.append({'file': '', 'line': 1, 'title': 'Privater Block verworfen, Inhalt ungeprüft',
+                                  'severity': 'medium', 'description': cut[offset:offset + 4000]})
+              body = body[:leftover[0].start()].rstrip()
+              if result == 'clean':
                   result = 'unclear'
-              with open(os.path.join(temp, 'result', 'report.md'), 'w', encoding='utf-8') as handle:
-                  handle.write(report)
+          if result != 'missing':
+              report = body + '\n\n' + '\n'.join(closing_lines) + '\n'
+              # The least length is that of the public report, as before.
+              if len(report) < 500:
+                  result = 'missing'
+              else:
+                  with open(os.path.join(temp, 'result', 'report.md'), 'w', encoding='utf-8') as handle:
+                      handle.write(report)
           with open(os.path.join(temp, 'result', 'result.txt'), 'w', encoding='utf-8') as handle:
               handle.write(result + '\n')
           with open(os.path.join(temp, 'private', 'findings.json'), 'w', encoding='utf-8') as handle:
               json.dump(private, handle)
-          print(f'Ergebnis: {result}, private Befunde: {len(private)}')
+          print(f'Ergebnis: {result}, private Befunde: {len(private)}, verworfene Blockmarken: {dropped}')
           PYTHON
 
       - name: Private Befunde als Code-Scanning-Alerts ablegen
@@ -1378,7 +1436,7 @@ jobs:
                 informationUri: "https://github.com/OpenGewerk/.github",
                 rules: [to_entries[] | {
                   id: "pr-security-review/\(.key)",
-                  shortDescription: {text: (.value.title // "Befund")}
+                  shortDescription: {text: ((.value.title // "Befund") | .[0:1000])}
                 }]
               }},
               automationDetails: {id: $category},
