@@ -1455,9 +1455,18 @@ jobs:
               }]
             }]
           }' "$RUNNER_TEMP/private/findings.json" > "$RUNNER_TEMP/private/findings.sarif"
+          # Through a file, not an argument: a long finding would pass the
+          # limit Linux sets for one argument (128 KiB). GitHub takes at most
+          # 10 MB compressed; above that the step says so and fails.
+          gzip -c "$RUNNER_TEMP/private/findings.sarif" > "$RUNNER_TEMP/private/findings.sarif.gz"
+          if [ "$(wc -c < "$RUNNER_TEMP/private/findings.sarif.gz")" -gt 10000000 ]; then
+            echo "Die privaten Befunde sind gepackt größer als 10 MB, GitHub nimmt sie so nicht an."
+            exit 1
+          fi
+          base64 -w0 "$RUNNER_TEMP/private/findings.sarif.gz" > "$RUNNER_TEMP/private/findings.sarif.b64"
           jq -n --arg sha "$BASE_SHA" --arg ref "refs/heads/$BASE_REF" \
-            --arg sarif "$(gzip -c "$RUNNER_TEMP/private/findings.sarif" | base64 -w0)" \
-            '{commit_sha: $sha, ref: $ref, sarif: $sarif}' > "$RUNNER_TEMP/private/upload.json"
+            --rawfile sarif "$RUNNER_TEMP/private/findings.sarif.b64" \
+            '{commit_sha: $sha, ref: $ref, sarif: ($sarif | rtrimstr("\n"))}' > "$RUNNER_TEMP/private/upload.json"
           gh api --method POST "repos/$GITHUB_REPOSITORY/code-scanning/sarifs" \
             --input "$RUNNER_TEMP/private/upload.json" > /dev/null
           echo "$count private Befunde als Code-Scanning-Alerts abgelegt."
