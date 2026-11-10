@@ -292,36 +292,44 @@ jobs:
           def pins_in(blob):
               # Every value under a key "uses", read the way YAML reads it, not
               # line by line: quotes, escapes, anchors and flow style all end up
-              # as the same string. Each node once, so an alias cannot multiply
-              # the walk.
-              found, seen, stack = [], set(), [yaml.safe_load(pr_git('cat-file', 'blob', blob))]
+              # as the same scalar. The walk goes over the composed nodes, not
+              # the built objects: a tag such as !!set would drop the values of
+              # a mapping, and a duplicate key would hide one of its values.
+              # Each node once, so an alias cannot multiply the walk.
+              root = yaml.compose(pr_git('cat-file', 'blob', blob), Loader=yaml.SafeLoader)
+              found, seen, stack = [], set(), [root] if root is not None else []
               while stack:
                   node = stack.pop()
                   if id(node) in seen:
                       continue
                   seen.add(id(node))
-                  if isinstance(node, dict):
-                      for key, value in node.items():
-                          if key == 'uses' and isinstance(value, str) and value.strip().lower().startswith(target):
-                              found.append(value.strip()[len(target):])
-                          stack.append(value)
-                  elif isinstance(node, list):
-                      stack.extend(node)
+                  if isinstance(node, yaml.MappingNode):
+                      for key, value in node.value:
+                          if (isinstance(key, yaml.ScalarNode) and key.value == 'uses'
+                                  and isinstance(value, yaml.ScalarNode)
+                                  and value.value.strip().lower().startswith(target)):
+                              found.append(value.value.strip()[len(target):])
+                          stack += [key, value]
+                  elif isinstance(node, yaml.SequenceNode):
+                      stack.extend(node.value)
               return found
 
 
           old, new, unread = [], [], []
           for path, old_blob, new_blob in changed:
-              if old_blob:
+              for blob, refs in ((old_blob, old), (new_blob, new)):
+                  if not blob:
+                      continue
                   try:
-                      old += [ref for ref in pins_in(old_blob) if ref not in old]
+                      found = pins_in(blob)
                   except Exception:
-                      pass
-              if new_blob:
-                  try:
-                      new += [ref for ref in pins_in(new_blob) if ref not in new]
-                  except Exception:
-                      unread.append(path)
+                      # Only the head counts: the base is what main already runs.
+                      if refs is new:
+                          unread.append(path)
+                      continue
+                  for ref in found:
+                      if ref not in refs:
+                          refs.append(ref)
           new = [ref for ref in new if ref not in old]
           if not new and not unread:
               print('Der PR ändert den Pin des Reviews nicht.')
