@@ -267,10 +267,12 @@ jobs:
               return subprocess.run(['git', '-C', 'pr', *args], capture_output=True, check=True).stdout
 
 
-          # The workflow files come from git itself, NUL-separated and only
-          # under .github/workflows at the root, where GitHub looks for them.
+          # The workflow files come from git itself, NUL-separated, and only
+          # those GitHub loads: *.yml and *.yaml directly in .github/workflows
+          # at the root (with glob magic a star does not cross a slash).
           raw = pr_git('diff', '--raw', '-z', '--no-renames', '--no-abbrev',
-                       os.environ['BASE_SHA'], 'HEAD', '--', '.github/workflows/').split(b'\0')
+                       os.environ['BASE_SHA'], 'HEAD', '--',
+                       ':(glob).github/workflows/*.yml', ':(glob).github/workflows/*.yaml').split(b'\0')
           changed = []
           for meta, name in zip(raw[0::2], raw[1::2]):
               old_mode, new_mode, old_blob, new_blob = meta.decode('ascii').lstrip(':').split(' ')[:4]
