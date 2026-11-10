@@ -275,12 +275,19 @@ jobs:
                        os.environ['BASE_SHA'], 'HEAD', '--',
                        ':(glob,icase).github/workflows/*.yml',
                        ':(glob,icase).github/workflows/*.yaml').split(b'\0')
-          changed = []
+          # Paths decode without loss (surrogateescape), so two of them never
+          # turn into one; they are only ever shown escaped.
+          changed, links = [], []
           for meta, name in zip(raw[0::2], raw[1::2]):
               old_mode, new_mode, old_blob, new_blob = meta.decode('ascii').lstrip(':').split(' ')[:4]
-              changed.append((name.decode('utf-8', errors='replace'),
-                              old_blob if old_mode not in ('000000', '160000') else None,
-                              new_blob if new_mode not in ('000000', '160000') else None))
+              path = name.decode('utf-8', errors='surrogateescape')
+              # Of a workflow as a symbolic link only the link, a path, could be
+              # read here, not the file GitHub may follow it to: unread.
+              if new_mode == '120000':
+                  links.append(path)
+              changed.append((path,
+                              old_blob if old_mode in ('100644', '100755') else None,
+                              new_blob if new_mode in ('100644', '100755') else None))
           if not changed:
               print('Der PR ändert den Pin des Reviews nicht.')
               raise SystemExit(0)
@@ -324,7 +331,7 @@ jobs:
               return found
 
 
-          old, new, unread = [], [], []
+          old, new, unread = [], [], links
           for path, old_blob, new_blob in changed:
               for blob, refs in ((old_blob, old), (new_blob, new)):
                   if not blob:
@@ -374,8 +381,9 @@ jobs:
           for path in unread:
               shown = path.encode('unicode_escape').decode('ascii')
               lines += ['', f'## Nicht lesbar: {shown}', '',
-                        'Diese Workflow-Datei lässt sich nicht als YAML lesen; ob sie den Pin ändert, ist offen.']
-              print(f'Workflow {shown}: nicht als YAML zu lesen.')
+                        'Diese Workflow-Datei lässt sich nicht lesen (kein YAML, das 1.1 und 1.2 gleich '
+                        'lesen, oder ein symbolischer Link); ob sie den Pin ändert, ist offen.']
+              print(f'Workflow {shown}: nicht zu lesen.')
           for sha in new:
               # From the pull request: escaped, so it stays on its line.
               shown = sha[:100].encode('unicode_escape').decode('ascii')
@@ -450,7 +458,8 @@ jobs:
           for meta, name in zip(raw[0::2], raw[1::2]):
               old_mode, new_mode, old_sha, new_sha = meta.decode('ascii').lstrip(':').split(' ')[:4]
               if old_mode == new_mode == '160000' and old_sha != new_sha:
-                  moved[name.decode('utf-8', errors='replace')] = {'-': old_sha, '+': new_sha}
+                  # Without loss, so two paths never turn into one.
+                  moved[name.decode('utf-8', errors='surrogateescape')] = {'-': old_sha, '+': new_sha}
           if not moved:
               print('Der PR hebt kein Submodul an.')
               raise SystemExit(0)
@@ -464,8 +473,10 @@ jobs:
           def address(submodule):
               # With -z a newline ends the key and NUL the value, so a name
               # with a space stays whole.
-              names = run('git', '-C', 'pr', 'config', '-z', '-f', '.gitmodules', '--get-regexp',
-                          r'^submodule\..*\.path$').stdout.split('\0')
+              # Decoded like the paths above, so the comparison matches them.
+              names = subprocess.run(['git', '-C', 'pr', 'config', '-z', '-f', '.gitmodules', '--get-regexp',
+                                      r'^submodule\..*\.path$'], capture_output=True, text=True,
+                                     encoding='utf-8', errors='surrogateescape').stdout.split('\0')
               for entry in names:
                   key, _, value = entry.partition('\n')
                   if value == submodule:
