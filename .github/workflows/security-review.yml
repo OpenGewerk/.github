@@ -1341,7 +1341,10 @@ jobs:
           if filled and lines[filled[-1]].strip() == 'REVIEW_COMPLETE':
               found = None
               if len(filled) >= 2:
-                  found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[filled[-2]].strip())
+                  # Exactly as the prompt writes it, so a line in another form,
+                  # extra blanks around it included, is unclear rather than a
+                  # result; only the CR of a CRLF line end goes.
+                  found = re.fullmatch(r'REVIEW_RESULT: (clean|findings)', lines[filled[-2]].rstrip('\r'))
               result = found.group(1) if found else 'unclear'
               # Not a result line, the line before REVIEW_COMPLETE belongs to
               # the report and goes through the same filter as the rest.
@@ -1377,8 +1380,10 @@ jobs:
                           'file': entry['file'] if isinstance(entry.get('file'), str) else '',
                           'title': entry['title'] if isinstance(entry.get('title'), str) else str(entry.get('title') or 'Befund'),
                           'severity': entry['severity'] if entry.get('severity') in ('high', 'medium', 'low') else 'medium',
+                          # In full: the public report no longer holds it.
                           'description': entry['description'] if isinstance(entry.get('description'), str)
-                          else str(entry.get('description') or '')[:4000],
+                          else json.dumps(entry.get('description'), ensure_ascii=False)
+                          if entry.get('description') is not None else '',
                       } for entry in entries]
                   else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
@@ -1446,14 +1451,23 @@ jobs:
                 message: {text: ((.value.title // "Befund") + ": " + (.value.description // ""))},
                 locations: [{physicalLocation: {
                   artifactLocation: {uri: ((.value.file // "") | if . == "" then "README.md" else . end)},
-                  region: {startLine: ((.value.line // 1) | if type == "number" and . > 0 then . else 1 end)}
+                  region: {startLine: ((.value.line // 1) | if type == "number" and . >= 1 and . < 2147483648 and . == floor then floor else 1 end)}
                 }}]
               }]
             }]
           }' "$RUNNER_TEMP/private/findings.json" > "$RUNNER_TEMP/private/findings.sarif"
+          # Through a file, not an argument: a long finding would pass the
+          # limit Linux sets for one argument (128 KiB). GitHub takes at most
+          # 10 MB compressed; above that the step says so and fails.
+          gzip -c "$RUNNER_TEMP/private/findings.sarif" > "$RUNNER_TEMP/private/findings.sarif.gz"
+          if [ "$(wc -c < "$RUNNER_TEMP/private/findings.sarif.gz")" -gt 10000000 ]; then
+            echo "Die privaten Befunde sind gepackt größer als 10 MB, GitHub nimmt sie so nicht an."
+            exit 1
+          fi
+          base64 -w0 "$RUNNER_TEMP/private/findings.sarif.gz" > "$RUNNER_TEMP/private/findings.sarif.b64"
           jq -n --arg sha "$BASE_SHA" --arg ref "refs/heads/$BASE_REF" \
-            --arg sarif "$(gzip -c "$RUNNER_TEMP/private/findings.sarif" | base64 -w0)" \
-            '{commit_sha: $sha, ref: $ref, sarif: $sarif}' > "$RUNNER_TEMP/private/upload.json"
+            --rawfile sarif "$RUNNER_TEMP/private/findings.sarif.b64" \
+            '{commit_sha: $sha, ref: $ref, sarif: ($sarif | rtrimstr("\n"))}' > "$RUNNER_TEMP/private/upload.json"
           gh api --method POST "repos/$GITHUB_REPOSITORY/code-scanning/sarifs" \
             --input "$RUNNER_TEMP/private/upload.json" > /dev/null
           echo "$count private Befunde als Code-Scanning-Alerts abgelegt."
