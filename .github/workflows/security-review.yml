@@ -266,9 +266,9 @@ jobs:
           with open(os.path.join(review, 'diff.patch'), encoding='utf-8', errors='replace') as handle:
               for line in handle:
                   if line.startswith('diff --git '):
-                      # Without the space before it: git still quotes a path
-                      # with a quote, a backslash or a control character.
-                      in_workflows = 'b/.github/workflows/' in line
+                      # The quote is optional: git still quotes a path with a
+                      # quote, a backslash or a control character.
+                      in_workflows = re.search(r' "?b/\.github/workflows/', line) is not None
                       continue
                   if not in_workflows or line.startswith(('---', '+++')):
                       continue
@@ -358,25 +358,25 @@ jobs:
           import subprocess
 
           review = os.path.join('pr', '.security-review')
-          gitlink = re.compile(r'^([-+])Subproject commit ([0-9a-f]{40})$')
           ours = re.compile(r'^https://github\.com/(?i:opengewerk)/[A-Za-z0-9._-]+$')
           # More than this of a diff is no reading for one review; the stat and
           # the commits still name everything, and the checkout of a trusted
           # pull request has the new state of the submodule in full.
           most = 3 * 1024 * 1024
 
-          moved, path = {}, None
-          with open(os.path.join(review, 'diff.patch'), encoding='utf-8', errors='replace') as handle:
-              for line in handle:
-                  if line.startswith('diff --git '):
-                      found = re.match(r'diff --git a/(\S+) b/(\S+)$', line.rstrip('\n'))
-                      path = found.group(2) if found else None
-                      continue
-                  found = gitlink.match(line.rstrip('\n'))
-                  if path and found:
-                      moved.setdefault(path, {})[found.group(1)] = found.group(2)
-          moved = {key: value for key, value in moved.items()
-                   if value.get('-') and value.get('+') and value['-'] != value['+']}
+          # The moved gitlinks come from git itself, with paths separated by NUL
+          # and never quoted, not from the headers of diff.patch, where a path
+          # with a space or a quote does not parse. The option overrides
+          # "ignore" in .gitmodules, as in the diff above; a failing git fails
+          # the step rather than reporting no submodule.
+          raw = subprocess.run(['git', '-C', 'pr', 'diff', '--raw', '-z', '--no-renames', '--no-abbrev',
+                                '--ignore-submodules=none', os.environ['BASE_SHA'], 'HEAD'],
+                               capture_output=True, check=True).stdout.split(b'\0')
+          moved = {}
+          for meta, name in zip(raw[0::2], raw[1::2]):
+              old_mode, new_mode, old_sha, new_sha = meta.decode('ascii').lstrip(':').split(' ')[:4]
+              if old_mode == new_mode == '160000' and old_sha != new_sha:
+                  moved[name.decode('utf-8', errors='replace')] = {'-': old_sha, '+': new_sha}
           if not moved:
               print('Der PR hebt kein Submodul an.')
               raise SystemExit(0)
