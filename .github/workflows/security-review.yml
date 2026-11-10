@@ -474,18 +474,22 @@ jobs:
           ]
           for number, (submodule, commits) in enumerate(sorted(moved.items()), start=1):
               old, new = commits['-'], commits['+']
-              lines += ['', f'## `{submodule}`: {old[:12]} auf {new[:12]}', '']
+              # From the pull request: escaped, so it stays on its line in the log
+              # and in the file; the raw path is only for the lookup in .gitmodules.
+              shown = submodule.encode('unicode_escape').decode('ascii')
+              lines += ['', f'## `{shown}`: {old[:12]} auf {new[:12]}', '']
               url = address(submodule)
               if not url or not ours.match(url):
                   lines.append(f'Die Adresse in `.gitmodules` ist kein Repository von OpenGewerk: '
-                               f'`{url or "keine"}`. Nichts geholt; der Stand des Submoduls ist zu prüfen.')
-                  print(f'Submodul {submodule}: Adresse nicht von OpenGewerk, nichts geholt.')
+                               f'`{(url or "keine").encode("unicode_escape").decode("ascii")}`. '
+                               'Nichts geholt; der Stand des Submoduls ist zu prüfen.')
+                  print(f'Submodul {shown}: Adresse nicht von OpenGewerk, nichts geholt.')
                   continue
               clone = os.path.join(os.environ['RUNNER_TEMP'], f'submodule-{number}')
               if run('git', 'clone', '--quiet', '--filter=blob:none', '--no-checkout',
                      url, clone).returncode != 0:
                   lines.append(f'{url} ließ sich nicht klonen.')
-                  print(f'Submodul {submodule}: {url} nicht zu klonen.')
+                  print(f'Submodul {shown}: {url} nicht zu klonen.')
                   continue
 
 
@@ -504,13 +508,13 @@ jobs:
                         f'- Standardzweig steht auf: {main}']
               if not present(new):
                   lines.append('- Der neue Commit lässt sich nicht holen.')
-                  print(f'Submodul {submodule}: {new[:7]} nicht zu holen.')
+                  print(f'Submodul {shown}: {new[:7]} nicht zu holen.')
                   continue
               on_main = git('merge-base', '--is-ancestor', new, 'origin/HEAD').returncode == 0
               lines.append(f'- Neuer Commit liegt auf dem Standardzweig: {"ja" if on_main else "nein"}')
               if not present(old):
                   lines.append('- Der bisherige Commit lässt sich nicht holen; ohne ihn gibt es keinen Diff.')
-                  print(f'Submodul {submodule}: bisheriger Commit {old[:7]} nicht zu holen.')
+                  print(f'Submodul {shown}: bisheriger Commit {old[:7]} nicht zu holen.')
                   continue
               added = git('log', '--format=%h %s', f'{old}..{new}').stdout.strip()
               dropped = git('log', '--format=%h %s', f'{new}..{old}').stdout.strip()
@@ -528,7 +532,7 @@ jobs:
               if dropped:
                   lines += ['', '### Commits, die mit dem neuen Commit wegfallen', '', '```', dropped, '```']
               lines += ['', '### Geänderte Dateien', '', '```', files or '(keine)', '```']
-              print(f'Submodul {submodule}: {new[:7]} auf dem Standardzweig {"ja" if on_main else "nein"}, '
+              print(f'Submodul {shown}: {new[:7]} auf dem Standardzweig {"ja" if on_main else "nein"}, '
                     f'{len(added.splitlines())} Commits seit {old[:7]}.')
 
           with open(os.path.join(review, 'submodules.md'), 'w', encoding='utf-8') as handle:
