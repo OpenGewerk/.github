@@ -1330,20 +1330,24 @@ jobs:
           lines = report.strip().split('\n')
           # Only the end of the answer counts, where the prompt puts it: the
           # last line REVIEW_COMPLETE, the one before it the result, right
-          # above them the block of private findings, if there is one. A result
-          # line or a block further up may be quoted from the pull request and
-          # decides nothing; a marker of such a block there leaves the result
-          # no better than unclear.
+          # above them the block of private findings, if there is one; blank
+          # lines between them do not count. A result line or a block further
+          # up may be quoted from the pull request and decides nothing; a
+          # marker of such a block there leaves the result no better than
+          # unclear.
           marker = r'<!--\s*PRIVATE-FINDINGS'
-          result, private = 'missing', []
-          dropped = len(re.findall(marker, report))
-          if len(lines) >= 2 and lines[-1].strip() == 'REVIEW_COMPLETE':
-              found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[-2].strip())
+          closing_marker = re.compile(r'PRIVATE-FINDINGS\s*-->')
+          filled = [index for index, line in enumerate(lines) if line.strip()]
+          result, private, body, closing_lines = 'missing', [], report, []
+          if filled and lines[filled[-1]].strip() == 'REVIEW_COMPLETE':
+              found = None
+              if len(filled) >= 2:
+                  found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[filled[-2]].strip())
               result = found.group(1) if found else 'unclear'
               # Not a result line, the line before REVIEW_COMPLETE belongs to
               # the report and goes through the same filter as the rest.
-              closing_lines = lines[-2:] if found else lines[-1:]
-              body = '\n'.join(lines[:len(lines) - len(closing_lines)]).rstrip()
+              closing_lines = [found.group(0), 'REVIEW_COMPLETE'] if found else ['REVIEW_COMPLETE']
+              body = '\n'.join(lines[:filled[-2] if found else filled[-1]]).rstrip()
               # The block starts at the start of a line: a JSON string holds no
               # raw line break, so a marker there is never one a description
               # quotes.
@@ -1369,19 +1373,28 @@ jobs:
                   else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
                                   'severity': 'medium', 'description': block[:4000]}]
-              # Every marker left further up: the public report ends before the
-              # first of them, whatever its strings hold, and the log counts
-              # them without their content.
-              dropped = len(re.findall(marker, body))
-              if dropped:
-                  body = body[:re.search(marker, body).start()].rstrip()
-                  if result == 'clean':
-                      result = 'unclear'
+          # Every marker left, further up or in an answer without its end: the
+          # public report ends before the first of them, whatever its strings
+          # hold. What each holds goes to a private alert of its own, marked
+          # unchecked: it may be quoted from the pull request, but a finding
+          # of the agent is never lost on the way. The log counts them.
+          leftover = list(re.finditer(marker, body))
+          dropped = len(leftover)
+          for match in leftover:
+              end = closing_marker.search(body, match.end())
+              content = body[match.end():end.start() if end else len(body)].strip()
+              private.append({'file': '', 'line': 1, 'title': 'Privater Block verworfen, Inhalt ungeprüft',
+                              'severity': 'medium', 'description': content[:4000]})
+          if dropped:
+              body = body[:leftover[0].start()].rstrip()
+              if result == 'clean':
+                  result = 'unclear'
+          if result != 'missing':
+              report = body + '\n\n' + '\n'.join(closing_lines) + '\n'
               # The least length is that of the public report, as before.
-              if len(body) < 500:
+              if len(report) < 500:
                   result = 'missing'
               else:
-                  report = body + '\n\n' + '\n'.join(line.strip() for line in closing_lines) + '\n'
                   with open(os.path.join(temp, 'result', 'report.md'), 'w', encoding='utf-8') as handle:
                       handle.write(report)
           with open(os.path.join(temp, 'result', 'result.txt'), 'w', encoding='utf-8') as handle:
