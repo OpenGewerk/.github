@@ -1436,7 +1436,7 @@ jobs:
                 informationUri: "https://github.com/OpenGewerk/.github",
                 rules: [to_entries[] | {
                   id: "pr-security-review/\(.key)",
-                  shortDescription: {text: (.value.title // "Befund")}
+                  shortDescription: {text: ((.value.title // "Befund") | .[0:1000])}
                 }]
               }},
               automationDetails: {id: $category},
