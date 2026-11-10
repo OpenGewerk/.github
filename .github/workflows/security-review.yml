@@ -123,7 +123,9 @@ jobs:
         # one who asks, by its reference of review commands; the coding agent
         # is started from its dashboard by members. A pull request of it with
         # code from a fork is one a maintainer asked for, as if they had pushed
-        # that code to a branch themselves. Dependabot stays outside: whether
+        # that code to a branch themselves. That this rests on the check of
+        # write access at CodeRabbit, which this workflow cannot test, the
+        # maintainer accepted on 10.11.2026. Dependabot stays outside: whether
         # a run it starts gets the variables of the sign-in is not settled, and
         # what it brings in is packages of others, which the review with a
         # shell would install.
