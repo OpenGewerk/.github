@@ -231,8 +231,12 @@ jobs:
           base_sha="$(git merge-base FETCH_HEAD HEAD)"
           rm -rf .security-review
           mkdir .security-review
-          git diff "$base_sha" HEAD > .security-review/diff.patch
-          git diff --name-status "$base_sha" HEAD > .security-review/changed-files.txt
+          # The attributes come from the base, not from the checkout: with
+          # "*.yml -diff" in its .gitattributes a pull request would turn its
+          # own changes into "Binary files differ", and the steps below would
+          # miss a moved pin or submodule.
+          git --attr-source="$base_sha" diff "$base_sha" HEAD > .security-review/diff.patch
+          git --attr-source="$base_sha" diff --name-status "$base_sha" HEAD > .security-review/changed-files.txt
           echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
           echo "Geänderte Dateien: $(wc -l < .security-review/changed-files.txt)"
 
