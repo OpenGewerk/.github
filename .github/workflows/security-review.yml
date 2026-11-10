@@ -14,15 +14,18 @@ name: Security-Review
 # Claude Code reviews the head of the pull request and gives its report as its
 # last answer. A second job, which the agent never sees, posts the report as a
 # review (changes requested with findings, approved without, and for a pull
-# request from outside never more than a comment) and sets the commit status
+# request from outside or of a bot never more than a comment) and sets the
+# commit status
 # PR-Security-Review on that head; pull_request_target
 # attaches the checks of its jobs to the base branch, so a status on the head
 # is the one result both triggers can give.
 #
 # Two modes, each on its own trigger; the run of the other trigger ends after
 # its first job:
-# - A pull request from a branch of the repository itself, opened by a member,
-#   is reviewed on pull_request with a shell. The shell runs in the sandbox of
+# - A pull request from a branch of the repository itself, opened by a member
+#   or by the coding agent of CodeRabbit, which works on tasks a maintainer
+#   starts and which the organisation trusts like a member, is reviewed on
+#   pull_request with a shell. The shell runs in the sandbox of
 #   Claude Code: a process namespace of its own, without the variables that
 #   request an identity token, without the token file, without sudo and
 #   Docker, writing only in the checkout and reaching nothing but the npm
@@ -33,12 +36,23 @@ name: Security-Review
 #   inside that sandbox, for the length of one command; none runs beside it.
 #   The organisation variable SECURITY_REVIEW_DATABASE, set to "aus",
 #   switches that off for every repository without a pull request.
-# - Anything else (a fork, an author outside the organisation, a bot) is
-#   reviewed by reading alone on pull_request_target, whose definition comes
-#   from main: no shell, nothing of the pull request is installed or run. Such
-#   a job runs in the environment security-review-extern, which each
+# - Anything else (a fork, an author outside the organisation, any other bot,
+#   Dependabot among them) is reviewed by reading alone on
+#   pull_request_target, whose definition comes from main: no shell, nothing
+#   of the pull request is installed or run. Such a job runs in the
+#   environment security-review-extern, which each
 #   repository protects with a maintainer as required reviewer, so that no
-#   one outside spends the budget of the review.
+#   one outside spends the budget of the review. Its agent has Read, Grep and
+#   Glob and no other tool: --tools sets the tools Claude Code offers at all,
+#   while --allowedTools only lets some run without asking and left Bash,
+#   among others, on offer, where Claude Code runs a command it judges
+#   read-only without asking. Before the review a run without sign-in checks
+#   which tools Claude Code offers, and one more stops the job. So it has no
+#   bubblewrap and needs none: the agent starts no subprocess that the
+#   variable CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would guard (no Bash, no hooks,
+#   no MCP), and the variable is set for the review with a shell only. Set
+#   without bubblewrap it stopped Claude Code before its first answer, and
+#   from the start until 09.11.2026 no review from outside got a report.
 # In both, the agent reads only inside the checkout and writes nothing: the
 # report is its answer, not a file something in the pull request could
 # overwrite. Settings, hooks, skills, MCP servers and CLAUDE.md of the
@@ -74,7 +88,7 @@ on:
 permissions: {}
 
 env:
-  CLAUDE_CODE_VERSION: 2.1.296
+  CLAUDE_CODE_VERSION: 2.1.321
   POSTGRES_VERSION: 18
   # The signing key of apt.postgresql.org.
   POSTGRES_KEY: B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
@@ -96,13 +110,37 @@ jobs:
         env:
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          AUTHOR_ID: ${{ github.event.pull_request.user.id }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        # The bot is trusted by its login and its account id together: the
+        # login of an app cannot be taken by a user, and the id stays the same
+        # if an app is ever renamed. Its branch must be one of the repository
+        # itself, as a member's must. Every command of CodeRabbit that changes
+        # code, commits or opens a pull request (unit tests, docstrings, fix
+        # comments, fix-ci, autofix, merge conflicts, local commit, simplify,
+        # recipes, configuration) needs write access to the repository of the
+        # one who asks, by its reference of review commands; the coding agent
+        # is started from its dashboard by members. A pull request of it with
+        # code from a fork is one a maintainer asked for, as if they had pushed
+        # that code to a branch themselves. That this rests on the check of
+        # write access at CodeRabbit, which this workflow cannot test, the
+        # maintainer accepted on 10.11.2026. Dependabot stays outside: whether
+        # a run it starts gets the variables of the sign-in is not settled, and
+        # what it brings in is packages of others, which the review with a
+        # shell would install.
         run: |
           trusted=false
-          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] && [ "$AUTHOR_TYPE" = "User" ]; then
-            case "$ASSOCIATION" in
-              OWNER|MEMBER|COLLABORATOR) trusted=true ;;
-            esac
+          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            if [ "$AUTHOR_TYPE" = "User" ]; then
+              case "$ASSOCIATION" in
+                OWNER|MEMBER|COLLABORATOR) trusted=true ;;
+              esac
+            elif [ "$AUTHOR_TYPE" = "Bot" ]; then
+              case "$AUTHOR_LOGIN:$AUTHOR_ID" in
+                'coderabbitai[bot]:136622811') trusted=true ;;
+              esac
+            fi
           fi
           handles=false
           if [ "$trusted" = "true" ] && [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
@@ -114,6 +152,8 @@ jobs:
           echo "handles=$handles" >> "$GITHUB_OUTPUT"
           if [ "$handles" = "false" ]; then
             echo "Diesen PR prüft der Lauf des anderen Auslösers."
+          elif [ "$trusted" = "true" ] && [ "$AUTHOR_TYPE" = "Bot" ]; then
+            echo "Review mit Shell in der Sandbox: PR aus dem Repository, Autor $AUTHOR_LOGIN."
           elif [ "$trusted" = "true" ]; then
             echo "Review mit Shell in der Sandbox: PR aus dem Repository, Autor $ASSOCIATION."
           else
@@ -432,8 +472,10 @@ jobs:
       # Allowing them opens the kernel to every process of the job through
       # user namespaces again: a flaw there leads to root, and root to the
       # token in the memory of the runner. That risk is carried knowingly, for
-      # pull requests of members only; one from outside gets no shell, and
-      # this step does not run for it.
+      # pull requests of members and of the coding agent of CodeRabbit only,
+      # each from a branch of the repository, which only those with write
+      # access push to; one from outside gets no shell, and this step does not
+      # run for it.
       - name: Sandbox vorbereiten
         if: ${{ env.TRUSTED == 'true' }}
         run: |
@@ -681,6 +723,7 @@ jobs:
 
       - name: Auftrag zusammenstellen
         env:
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -860,7 +903,15 @@ jobs:
                       'des PRs. Was sich nur mit Datenbank belegen ließe, bleibt `open_proof_gap`. '
                   )
               mode = (
-                  'Review mit Shell: Der PR kommt von einem Mitglied aus einem Branch des Repositorys. '
+                  'Review mit Shell: Der PR kommt '
+                  + (
+                      'vom Coding-Agent von CodeRabbit aus einem Branch des Repositorys. Seinen Code hat '
+                      'ein Modell geschrieben, auch nach Text, den andere verfasst haben können; prüfe '
+                      'ihn so streng wie den eines Menschen. '
+                      if os.environ.get('AUTHOR_TYPE') == 'Bot'
+                      else 'von einem Mitglied aus einem Branch des Repositorys. '
+                  )
+                  + 
                   'Deine Shell läuft in einer Sandbox: ohne Netz außer der npm-Registry, ohne sudo, '
                   'schreibend nur im Arbeitsverzeichnis. Abhängigkeiten sind nicht installiert, und im '
                   'Arbeitsverzeichnis selbst lässt sich nichts installieren: `package.json`, die '
@@ -911,8 +962,10 @@ jobs:
       # read the proxy variables by itself: NODE_USE_ENV_PROXY makes Node do
       # it, and means nothing outside the sandbox, where none is set.
       # --safe-mode and --setting-sources user
-      # load nothing of the checkout; dontAsk turns down every tool not
-      # allowed instead of asking.
+      # load nothing of the checkout; --tools offers the allowed tools and no
+      # other, and dontAsk turns down whatever would ask. With the scrub on,
+      # Claude Code sets the mode back to default; nothing asks there either,
+      # since every tool on offer is allowed.
       - name: Review mit Claude Code
         run: |
           token_file="$RUNNER_TEMP/anthropic-identity-token"
@@ -963,11 +1016,53 @@ jobs:
             settings='{"permissions": {"blockReadsOutsideWorkingDirectories": true}}'
           fi
 
+          # The scrub needs bubblewrap, which only the review with a shell installs
+          # ("Sandbox vorbereiten"). Without a shell, hooks or MCP servers the review by
+          # reading alone starts nothing it would guard; set there anyway, it ended
+          # Claude Code before its first answer.
+          if [ "$TRUSTED" = "true" ]; then
+            scrub=1
+            denied=(WebFetch WebSearch Write Edit NotebookEdit)
+          else
+            scrub=0
+            denied=(Bash WebFetch WebSearch Write Edit NotebookEdit)
+          fi
+
+          # The tools Claude Code offers at all (--tools), not only those it runs
+          # without asking (--allowedTools): without it Bash, Task, Workflow
+          # and more were on offer in both modes, and Claude Code runs a Bash
+          # command it judges read-only without asking, also in the review by
+          # reading alone, where nothing sandboxes it. Checked before the
+          # review: a run without sign-in names the tools in its first event
+          # and ends at the sign-in, and one more than allowed stops the job.
+          offered="$(env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+              -u ANTHROPIC_FEDERATION_RULE_ID -u ANTHROPIC_ORGANIZATION_ID \
+              -u ANTHROPIC_SERVICE_ACCOUNT_ID -u ANTHROPIC_WORKSPACE_ID \
+              CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-preflight" \
+              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB="$scrub" \
+              claude -p --safe-mode --setting-sources user --strict-mcp-config --no-session-persistence \
+                --settings "$settings" \
+                --model "$REVIEW_MODEL" --permission-mode dontAsk \
+                --output-format stream-json --verbose \
+                --tools "${allowed[@]}" \
+                --allowedTools "${allowed[@]}" \
+                --disallowedTools "${denied[@]}" \
+                <<< "Werkzeuge" 2> /dev/null \
+            | jq -c 'select(.type == "system" and .subtype == "init") | .tools' | head -n 1 || true)"
+          extra="$(jq -n -r --argjson offered "${offered:-null}" --args '
+              if $offered == null then "kein Start" else ($offered - $ARGS.positional | join(" ")) end' \
+            "${allowed[@]}")"
+          if [ -n "$extra" ]; then
+            echo "Claude Code bietet mehr Werkzeuge an als erlaubt: $extra. Das Review läuft so nicht."
+            exit 1
+          fi
+          echo "Werkzeuge: $offered"
+
           # Arguments are NAME=VALUE pairs for the environment of this run.
           run_review() {
             env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
               ANTHROPIC_IDENTITY_TOKEN_FILE="$token_file" \
-              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 \
+              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB="$scrub" \
               COREPACK_HOME="$cache/corepack" \
               NODE_USE_ENV_PROXY=1 \
               PATH="$GITHUB_WORKSPACE/pr/.security-review/bin:$PATH" \
@@ -979,8 +1074,9 @@ jobs:
                 --settings "$settings" \
                 --model "$REVIEW_MODEL" --permission-mode dontAsk \
                 --output-format stream-json --verbose \
+                --tools "${allowed[@]}" \
                 --allowedTools "${allowed[@]}" \
-                --disallowedTools WebFetch WebSearch Write Edit NotebookEdit \
+                --disallowedTools "${denied[@]}" \
                 < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/claude.jsonl"
           }
           # The run ended without an answer because the account has no credit
@@ -1178,6 +1274,7 @@ jobs:
           # artifact comes from the job that read the pull request and only
           # says what its report found.
           TRUSTED: ${{ needs.mode.outputs.trusted }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
         run: |
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           result="$(cat result/result.txt 2> /dev/null || echo missing)"
@@ -1214,10 +1311,12 @@ jobs:
           # found something or is unclear, approved where it found nothing.
           # A pull request from outside is never approved by this review: a
           # model judged text that can be written to steer it, and an approval
-          # is what such text would aim for. It gets a comment instead.
+          # is what such text would aim for. It gets a comment instead. So does
+          # one of a bot: its code is what a model wrote, after text that others
+          # can have written, and its approval stays with a person.
           if [ "$result" != "clean" ]; then
             event=REQUEST_CHANGES
-          elif [ "$TRUSTED" = "true" ]; then
+          elif [ "$TRUSTED" = "true" ] && [ "$AUTHOR_TYPE" = "User" ]; then
             event=APPROVE
           else
             event=COMMENT
