@@ -1362,7 +1362,9 @@ jobs:
                   body = body[:heads[-1]].rstrip()
                   try:
                       entries = json.loads(block)
-                  except json.JSONDecodeError:
+                  except (ValueError, RecursionError):
+                      # JSONDecodeError is a ValueError; so is an integer past
+                      # the digit limit, and deep nesting ends in recursion.
                       entries = None
                   entries = [entries] if isinstance(entries, dict) else entries
                   # A block found here never goes without an alert: any other
