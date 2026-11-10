@@ -1347,21 +1347,31 @@ jobs:
               heads = [match.start() for match in re.finditer(r'(?m)^[ \t]*' + marker, body)]
               block = None
               if heads:
-                  block = re.fullmatch(r'[ \t]*' + marker + r'\s*(.*?)\s*PRIVATE-FINDINGS\s*-->',
-                                       body[heads[-1]:], re.S)
-              if block:
+                  # The end is checked anchored, so no run of blanks makes the
+                  # match backtrack.
+                  tail = re.sub(r'\A[ \t]*' + marker, '', body[heads[-1]:], count=1)
+                  closing = re.search(r'PRIVATE-FINDINGS\s*-->\Z', tail)
+                  block = tail[:closing.start()].strip() if closing else None
+              if block is not None:
                   body = body[:heads[-1]].rstrip()
                   try:
-                      entries = json.loads(block.group(1))
-                      private = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+                      entries = json.loads(block)
                   except json.JSONDecodeError:
+                      entries = None
+                  entries = [entries] if isinstance(entries, dict) else entries
+                  # A block found here never goes without an alert: any other
+                  # form becomes one entry that says so.
+                  if isinstance(entries, list) and all(isinstance(entry, dict) for entry in entries):
+                      private = entries
+                  else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
-                                  'severity': 'medium', 'description': block.group(1)[:4000]}]
-              # Every marker left further up: out of the public report as well,
-              # whole or up to the end, counted in the log without its content.
+                                  'severity': 'medium', 'description': block[:4000]}]
+              # Every marker left further up: the public report ends before the
+              # first of them, whatever its strings hold, and the log counts
+              # them without their content.
               dropped = len(re.findall(marker, body))
               if dropped:
-                  body = re.sub(marker + r'.*?(?:PRIVATE-FINDINGS\s*-->|\Z)', '', body, flags=re.S)
+                  body = body[:re.search(marker, body).start()].rstrip()
                   if result == 'clean':
                       result = 'unclear'
               # The least length is that of the public report, as before.
