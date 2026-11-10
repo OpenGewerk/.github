@@ -1450,7 +1450,7 @@ jobs:
                 message: {text: ((.value.title // "Befund") + ": " + (.value.description // ""))},
                 locations: [{physicalLocation: {
                   artifactLocation: {uri: ((.value.file // "") | if . == "" then "README.md" else . end)},
-                  region: {startLine: ((.value.line // 1) | if type == "number" and . > 0 and . == floor then . else 1 end)}
+                  region: {startLine: ((.value.line // 1) | if type == "number" and . >= 1 and . < 2147483648 and . == floor then floor else 1 end)}
                 }}]
               }]
             }]
