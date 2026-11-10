@@ -473,10 +473,11 @@ jobs:
           def address(submodule):
               # With -z a newline ends the key and NUL the value, so a name
               # with a space stays whole.
-              # Decoded like the paths above, so the comparison matches them.
+              # Decoded like the paths above, so the comparison matches them;
+              # as bytes, since text mode would turn a CR in a path into LF.
               names = subprocess.run(['git', '-C', 'pr', 'config', '-z', '-f', '.gitmodules', '--get-regexp',
-                                      r'^submodule\..*\.path$'], capture_output=True, text=True,
-                                     encoding='utf-8', errors='surrogateescape').stdout.split('\0')
+                                      r'^submodule\..*\.path$'], capture_output=True
+                                     ).stdout.decode('utf-8', errors='surrogateescape').split('\0')
               for entry in names:
                   key, _, value = entry.partition('\n')
                   if value == submodule:
