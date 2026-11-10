@@ -258,27 +258,70 @@ jobs:
           import subprocess
 
           review = os.path.join('pr', '.security-review')
-          pin = re.compile(r'(?i:opengewerk)/\.github/\.github/workflows/security-review\.yml@([0-9a-f]{40})\b')
+          target = 'opengewerk/.github/.github/workflows/security-review.yml@'
+          full_sha = re.compile(r'^[0-9a-f]{40}$')
           workflow = '.github/workflows/security-review.yml'
 
-          old, new = [], []
-          in_workflows = False
-          with open(os.path.join(review, 'diff.patch'), encoding='utf-8', errors='replace') as handle:
-              for line in handle:
-                  if line.startswith('diff --git '):
-                      # The quote is optional: git still quotes a path with a
-                      # quote, a backslash or a control character.
-                      in_workflows = re.search(r' "?b/\.github/workflows/', line) is not None
+
+          def pr_git(*args):
+              return subprocess.run(['git', '-C', 'pr', *args], capture_output=True, check=True).stdout
+
+
+          # The workflow files come from git itself, NUL-separated and only
+          # under .github/workflows at the root, where GitHub looks for them.
+          raw = pr_git('diff', '--raw', '-z', '--no-renames', '--no-abbrev',
+                       os.environ['BASE_SHA'], 'HEAD', '--', '.github/workflows/').split(b'\0')
+          changed = []
+          for meta, name in zip(raw[0::2], raw[1::2]):
+              old_mode, new_mode, old_blob, new_blob = meta.decode('ascii').lstrip(':').split(' ')[:4]
+              changed.append((name.decode('utf-8', errors='replace'),
+                              old_blob if old_mode not in ('000000', '160000') else None,
+                              new_blob if new_mode not in ('000000', '160000') else None))
+          if not changed:
+              print('Der PR ändert den Pin des Reviews nicht.')
+              raise SystemExit(0)
+
+          try:
+              import yaml
+          except ImportError:
+              raise SystemExit('PyYAML fehlt auf dem Runner, der Pin des Reviews lässt sich nicht prüfen.')
+
+
+          def pins_in(blob):
+              # Every value under a key "uses", read the way YAML reads it, not
+              # line by line: quotes, escapes, anchors and flow style all end up
+              # as the same string. Each node once, so an alias cannot multiply
+              # the walk.
+              found, seen, stack = [], set(), [yaml.safe_load(pr_git('cat-file', 'blob', blob))]
+              while stack:
+                  node = stack.pop()
+                  if id(node) in seen:
                       continue
-                  if not in_workflows or line.startswith(('---', '+++')):
-                      continue
-                  for sha in pin.findall(line):
-                      if line.startswith('-') and sha not in old:
-                          old.append(sha)
-                      elif line.startswith('+') and sha not in new:
-                          new.append(sha)
-          new = [sha for sha in new if sha not in old]
-          if not new:
+                  seen.add(id(node))
+                  if isinstance(node, dict):
+                      for key, value in node.items():
+                          if key == 'uses' and isinstance(value, str) and value.strip().lower().startswith(target):
+                              found.append(value.strip()[len(target):])
+                          stack.append(value)
+                  elif isinstance(node, list):
+                      stack.extend(node)
+              return found
+
+
+          old, new, unread = [], [], []
+          for path, old_blob, new_blob in changed:
+              if old_blob:
+                  try:
+                      old += [ref for ref in pins_in(old_blob) if ref not in old]
+                  except Exception:
+                      pass
+              if new_blob:
+                  try:
+                      new += [ref for ref in pins_in(new_blob) if ref not in new]
+                  except Exception:
+                      unread.append(path)
+          new = [ref for ref in new if ref not in old]
+          if not new and not unread:
               print('Der PR ändert den Pin des Reviews nicht.')
               raise SystemExit(0)
 
@@ -299,7 +342,7 @@ jobs:
 
 
           main = git('rev-parse', 'origin/main').stdout.strip()
-          base = old[0] if old and present(old[0]) else None
+          base = next((ref for ref in old if full_sha.match(ref) and present(ref)), None)
           lines = [
               '# Neuer Pin des Security-Reviews', '',
               'Diese Datei hat der Workflow vor dem Review geschrieben, aus dem öffentlichen Repository '
@@ -308,8 +351,19 @@ jobs:
               f'- Bisher angeheftet: {", ".join(old) or "keiner"}',
               f'- `main` von OpenGewerk/.github steht auf: {main}',
           ]
+          for path in unread:
+              shown = path.encode('unicode_escape').decode('ascii')
+              lines += ['', f'## Nicht lesbar: {shown}', '',
+                        'Diese Workflow-Datei lässt sich nicht als YAML lesen; ob sie den Pin ändert, ist offen.']
+              print(f'Workflow {shown}: nicht als YAML zu lesen.')
           for sha in new:
-              lines += ['', f'## Neu angeheftet: {sha}', '']
+              # From the pull request: escaped, so it stays on its line.
+              shown = sha[:100].encode('unicode_escape').decode('ascii')
+              lines += ['', f'## Neu angeheftet: {shown}', '']
+              if not full_sha.match(sha):
+                  lines.append('Das ist kein vollständiger Commit-SHA; nichts geholt.')
+                  print(f'Neuer Pin {shown[:40]}: kein vollständiger Commit-SHA.')
+                  continue
               if not present(sha):
                   lines.append('Der Commit lässt sich aus OpenGewerk/.github nicht holen.')
                   print(f'Neuer Pin {sha[:7]}: nicht zu holen.')
@@ -388,10 +442,12 @@ jobs:
 
 
           def address(submodule):
-              names = run('git', '-C', 'pr', 'config', '-f', '.gitmodules', '--get-regexp',
-                          r'^submodule\..*\.path$').stdout.splitlines()
+              # With -z a newline ends the key and NUL the value, so a name
+              # with a space stays whole.
+              names = run('git', '-C', 'pr', 'config', '-z', '-f', '.gitmodules', '--get-regexp',
+                          r'^submodule\..*\.path$').stdout.split('\0')
               for entry in names:
-                  key, _, value = entry.partition(' ')
+                  key, _, value = entry.partition('\n')
                   if value == submodule:
                       name = key[len('submodule.'):-len('.path')]
                       url = run('git', '-C', 'pr', 'config', '-f', '.gitmodules', '--get',
@@ -771,7 +827,9 @@ jobs:
              öffentlichen Repository geholt hat: ob der Commit auf dessen `main` liegt, die Commits
              dazwischen, der Diff der Workflow-Datei und der Pfad, unter dem die ganze Datei dieses
              Commits liegt. Prüfe den Diff im Zusammenhang der ganzen Datei wie Code des PRs; ein
-             Commit, der nicht auf `main` liegt oder sich nicht holen lässt, ist ein Befund.
+             Commit, der nicht auf `main` liegt oder sich nicht holen lässt, ein Pin, der kein
+             vollständiger Commit-SHA ist, und eine Workflow-Datei, die der Workflow nicht lesen
+             konnte, sind ein Befund.
              Hebt der PR ein Submodul an (im Diff nur die Zeile `Subproject commit`), steht in
              `.security-review/submodules.md`, was der Workflow vor dir aus dem öffentlichen
              Repository des Submoduls geholt hat: ob der neue Commit auf dessen Standardzweig liegt,
