@@ -1336,7 +1336,6 @@ jobs:
           # marker of such a block there leaves the result no better than
           # unclear.
           marker = r'<!--\s*PRIVATE-FINDINGS'
-          closing_marker = re.compile(r'PRIVATE-FINDINGS\s*-->')
           filled = [index for index, line in enumerate(lines) if line.strip()]
           result, private, body, closing_lines = 'missing', [], report, []
           if filled and lines[filled[-1]].strip() == 'REVIEW_COMPLETE':
@@ -1381,7 +1380,8 @@ jobs:
                       } for entry in entries]
                   else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
-                                  'severity': 'medium', 'description': block[:4000]}]
+                                  'severity': 'medium', 'description': block[offset:offset + 4000]}
+                                 for offset in range(0, max(len(block), 1), 4000)]
           # Every marker left, further up or in an answer without its end: the
           # public report ends before the first of them, whatever its strings
           # hold. What each holds goes to a private alert of its own, marked
@@ -1389,12 +1389,13 @@ jobs:
           # of the agent is never lost on the way. The log counts them.
           leftover = list(re.finditer(marker, body))
           dropped = len(leftover)
-          for match in leftover:
-              end = closing_marker.search(body, match.end())
-              content = body[match.end():end.start() if end else len(body)].strip()
-              private.append({'file': '', 'line': 1, 'title': 'Privater Block verworfen, Inhalt ungeprüft',
-                              'severity': 'medium', 'description': content[:4000]})
           if dropped:
+              # Everything the public report loses goes private, in full and
+              # in pieces of 4000 characters.
+              cut = body[leftover[0].start():].strip()
+              for offset in range(0, len(cut), 4000):
+                  private.append({'file': '', 'line': 1, 'title': 'Privater Block verworfen, Inhalt ungeprüft',
+                                  'severity': 'medium', 'description': cut[offset:offset + 4000]})
               body = body[:leftover[0].start()].rstrip()
               if result == 'clean':
                   result = 'unclear'
