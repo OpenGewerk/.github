@@ -1341,7 +1341,9 @@ jobs:
           if filled and lines[filled[-1]].strip() == 'REVIEW_COMPLETE':
               found = None
               if len(filled) >= 2:
-                  found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[filled[-2]].strip())
+                  # Exactly as the prompt writes it, so a line in another form
+                  # is unclear rather than a result.
+                  found = re.fullmatch(r'REVIEW_RESULT: (clean|findings)', lines[filled[-2]].strip())
               result = found.group(1) if found else 'unclear'
               # Not a result line, the line before REVIEW_COMPLETE belongs to
               # the report and goes through the same filter as the rest.
@@ -1377,8 +1379,10 @@ jobs:
                           'file': entry['file'] if isinstance(entry.get('file'), str) else '',
                           'title': entry['title'] if isinstance(entry.get('title'), str) else str(entry.get('title') or 'Befund'),
                           'severity': entry['severity'] if entry.get('severity') in ('high', 'medium', 'low') else 'medium',
+                          # In full: the public report no longer holds it.
                           'description': entry['description'] if isinstance(entry.get('description'), str)
-                          else str(entry.get('description') or '')[:4000],
+                          else json.dumps(entry.get('description'), ensure_ascii=False)
+                          if entry.get('description') is not None else '',
                       } for entry in entries]
                   else:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
@@ -1446,7 +1450,7 @@ jobs:
                 message: {text: ((.value.title // "Befund") + ": " + (.value.description // ""))},
                 locations: [{physicalLocation: {
                   artifactLocation: {uri: ((.value.file // "") | if . == "" then "README.md" else . end)},
-                  region: {startLine: ((.value.line // 1) | if type == "number" and . > 0 then . else 1 end)}
+                  region: {startLine: ((.value.line // 1) | if type == "number" and . > 0 and . == floor then . else 1 end)}
                 }}]
               }]
             }]
