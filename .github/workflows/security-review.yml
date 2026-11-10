@@ -282,20 +282,23 @@ jobs:
               old_mode, new_mode, old_blob, new_blob = meta.decode('ascii').lstrip(':').split(' ')[:4]
               path = name.decode('utf-8', errors='surrogateescape')
               # Of a workflow as a symbolic link only the link, a path, could be
-              # read here, not the file GitHub may follow it to: unread.
-              if new_mode == '120000':
-                  links.append(path)
+              # read here, not the file GitHub may follow it to: unread, from
+              # the tree below.
               changed.append((path,
                               old_blob if old_mode in ('100644', '100755') else None,
                               new_blob if new_mode in ('100644', '100755') else None))
-          # A folder on the way to the workflows that becomes a link hands
-          # GitHub files the pathspec above never sees: unread as well.
-          above = pr_git('diff', '--raw', '-z', '--no-renames', '--no-abbrev',
-                         os.environ['BASE_SHA'], 'HEAD', '--', ':(icase).github').split(b'\0')
-          for meta, name in zip(above[0::2], above[1::2]):
-              new_mode = meta.decode('ascii').lstrip(':').split(' ')[1]
+          # Links come from the tree of the head, not from the diff: one the
+          # base already has would never show as changed. A folder on the way
+          # to the workflows that is a link hands GitHub files the pathspec
+          # above never sees: unread as well.
+          for entry in pr_git('ls-tree', '-r', '-t', '-z', '--full-tree', 'HEAD').split(b'\0'):
+              meta, _, name = entry.partition(b'\t')
+              if not meta.startswith(b'120000 '):
+                  continue
               path = name.decode('utf-8', errors='surrogateescape')
-              if new_mode == '120000' and path.lower() in ('.github', '.github/workflows'):
+              folder, _, file = path.lower().rpartition('/')
+              if path.lower() in ('.github', '.github/workflows') or (
+                      folder == '.github/workflows' and file.endswith(('.yml', '.yaml'))):
                   links.append(path)
           if not changed and not links:
               print('Der PR ändert den Pin des Reviews nicht.')
@@ -487,14 +490,18 @@ jobs:
               names = subprocess.run(['git', '-C', 'pr', 'config', '-z', '-f', '.gitmodules', '--get-regexp',
                                       r'^submodule\..*\.path$'], capture_output=True
                                      ).stdout.decode('utf-8', errors='surrogateescape').split('\0')
+              # Every entry for the path: with more than one, git takes the
+              # last and this lookup could vouch for another, so the caller
+              # names none of them.
+              urls = []
               for entry in names:
                   key, _, value = entry.partition('\n')
                   if value == submodule:
                       name = key[len('submodule.'):-len('.path')]
                       url = run('git', '-C', 'pr', 'config', '-f', '.gitmodules', '--get',
                                 f'submodule.{name}.url').stdout.strip()
-                      return url[:-4] if url.endswith('.git') else url
-              return None
+                      urls.append(url[:-4] if url.endswith('.git') else url)
+              return urls
 
 
           lines = [
@@ -509,8 +516,16 @@ jobs:
               # and in the file; the raw path is only for the lookup in .gitmodules.
               shown = submodule.encode('unicode_escape').decode('ascii')
               lines += ['', f'## `{shown}`: {old[:12]} auf {new[:12]}', '']
-              url = address(submodule)
-              if not url or not ours.match(url):
+              urls = address(submodule)
+              if len(urls) > 1:
+                  lines.append('In `.gitmodules` stehen mehrere Einträge für diesen Pfad; welche Adresse git '
+                               'nimmt, hängt an ihrer Reihenfolge. Nichts geholt; der Stand des Submoduls '
+                               'ist zu prüfen.')
+                  print(f'Submodul {shown}: mehrere Einträge in .gitmodules, nichts geholt.')
+                  continue
+              url = urls[0] if urls else None
+              # fullmatch: with match and $ a newline at the end would pass.
+              if not url or not ours.fullmatch(url):
                   lines.append(f'Die Adresse in `.gitmodules` ist kein Repository von OpenGewerk: '
                                f'`{(url or "keine").encode("unicode_escape").decode("ascii")}`. '
                                'Nichts geholt; der Stand des Submoduls ist zu prüfen.')
@@ -900,7 +915,8 @@ jobs:
              die Commits dazwischen, die geänderten Dateien und der Pfad, unter dem der ganze Diff
              des Submoduls liegt. Prüfe diesen Diff wie Code des PRs, statt das Submodul offen zu
              lassen. Ein Commit, der nicht auf dem Standardzweig liegt oder sich nicht holen lässt,
-             und eine Adresse, die kein Repository von OpenGewerk ist, sind ein Befund.
+             eine Adresse, die kein Repository von OpenGewerk ist, und mehrere Einträge in
+             `.gitmodules` für denselben Pfad sind ein Befund.
           2. Gib den Report als deine letzte Antwort aus, als Markdown auf Deutsch. Lege dafür keine
              Datei an; ein Werkzeug zum Schreiben hast du nicht, und gelesen wird nur innerhalb des
              Arbeitsverzeichnisses.
