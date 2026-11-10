@@ -1334,37 +1334,48 @@ jobs:
           # line or a block further up may be quoted from the pull request and
           # decides nothing; a marker of such a block there leaves the result
           # no better than unclear.
+          marker = r'<!--\s*PRIVATE-FINDINGS'
           result, private = 'missing', []
-          if len(report) >= 500 and len(lines) >= 2 and lines[-1].strip() == 'REVIEW_COMPLETE':
+          dropped = len(re.findall(marker, report))
+          if len(lines) >= 2 and lines[-1].strip() == 'REVIEW_COMPLETE':
               found = re.fullmatch(r'REVIEW_RESULT:\s*(clean|findings)', lines[-2].strip())
               result = found.group(1) if found else 'unclear'
               body = '\n'.join(lines[:-2]).rstrip()
-              starts = [match.start() for match in re.finditer(r'<!--\s*PRIVATE-FINDINGS', body)]
+              # The block starts at the start of a line: a JSON string holds no
+              # raw line break, so a marker there is never one a description
+              # quotes.
+              heads = [match.start() for match in re.finditer(r'(?m)^[ \t]*' + marker, body)]
               block = None
-              if starts:
-                  block = re.fullmatch(r'<!--\s*PRIVATE-FINDINGS\s*(.*?)\s*PRIVATE-FINDINGS\s*-->',
-                                       body[starts[-1]:], re.S)
+              if heads:
+                  block = re.fullmatch(r'[ \t]*' + marker + r'\s*(.*?)\s*PRIVATE-FINDINGS\s*-->',
+                                       body[heads[-1]:], re.S)
               if block:
-                  body = body[:starts[-1]].rstrip()
+                  body = body[:heads[-1]].rstrip()
                   try:
                       entries = json.loads(block.group(1))
                       private = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
                   except json.JSONDecodeError:
                       private = [{'file': '', 'line': 1, 'title': 'Privater Befund, nicht lesbar',
                                   'severity': 'medium', 'description': block.group(1)[:4000]}]
-              if len(starts) > (1 if block else 0):
-                  # Out of the public report as well, whole or up to the end.
-                  body = re.sub(r'<!--\s*PRIVATE-FINDINGS.*?(?:PRIVATE-FINDINGS\s*-->|\Z)', '', body, flags=re.S)
+              # Every marker left further up: out of the public report as well,
+              # whole or up to the end, counted in the log without its content.
+              dropped = len(re.findall(marker, body))
+              if dropped:
+                  body = re.sub(marker + r'.*?(?:PRIVATE-FINDINGS\s*-->|\Z)', '', body, flags=re.S)
                   if result == 'clean':
                       result = 'unclear'
-              report = body + '\n\n' + '\n'.join(line.strip() for line in lines[-2:]) + '\n'
-              with open(os.path.join(temp, 'result', 'report.md'), 'w', encoding='utf-8') as handle:
-                  handle.write(report)
+              # The least length is that of the public report, as before.
+              if len(body) < 500:
+                  result = 'missing'
+              else:
+                  report = body + '\n\n' + '\n'.join(line.strip() for line in lines[-2:]) + '\n'
+                  with open(os.path.join(temp, 'result', 'report.md'), 'w', encoding='utf-8') as handle:
+                      handle.write(report)
           with open(os.path.join(temp, 'result', 'result.txt'), 'w', encoding='utf-8') as handle:
               handle.write(result + '\n')
           with open(os.path.join(temp, 'private', 'findings.json'), 'w', encoding='utf-8') as handle:
               json.dump(private, handle)
-          print(f'Ergebnis: {result}, private Befunde: {len(private)}')
+          print(f'Ergebnis: {result}, private Befunde: {len(private)}, verworfene Blockmarken: {dropped}')
           PYTHON
 
       - name: Private Befunde als Code-Scanning-Alerts ablegen
