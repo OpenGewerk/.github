@@ -288,7 +288,16 @@ jobs:
               changed.append((path,
                               old_blob if old_mode in ('100644', '100755') else None,
                               new_blob if new_mode in ('100644', '100755') else None))
-          if not changed:
+          # A folder on the way to the workflows that becomes a link hands
+          # GitHub files the pathspec above never sees: unread as well.
+          above = pr_git('diff', '--raw', '-z', '--no-renames', '--no-abbrev',
+                         os.environ['BASE_SHA'], 'HEAD', '--', ':(icase).github').split(b'\0')
+          for meta, name in zip(above[0::2], above[1::2]):
+              new_mode = meta.decode('ascii').lstrip(':').split(' ')[1]
+              path = name.decode('utf-8', errors='surrogateescape')
+              if new_mode == '120000' and path.lower() in ('.github', '.github/workflows'):
+                  links.append(path)
+          if not changed and not links:
               print('Der PR ändert den Pin des Reviews nicht.')
               raise SystemExit(0)
 
@@ -560,6 +569,25 @@ jobs:
           with open(os.path.join(review, 'submodules.md'), 'w', encoding='utf-8') as handle:
               handle.write('\n'.join(lines) + '\n')
           PYTHON
+
+      # The agent finds no symbolic link in the checkout of a pull request
+      # from outside: one could point out of it, at the token file of this
+      # job for instance. The lock on reads outside the working directory in
+      # Claude Code is meant to resolve links too; this does not rely on it.
+      # The target of every link still stands in diff.patch. The steps above
+      # read git objects and .gitmodules, which git never checks out as a
+      # link. No names go to the log: a path from the fork could carry a
+      # newline and a workflow command.
+      - name: Symbolische Links im Checkout entfernen
+        if: ${{ env.TRUSTED != 'true' }}
+        run: |
+          count="$(find pr -path pr/.git -prune -o -type l -printf x | wc -c)"
+          find pr -path pr/.git -prune -o -type l -exec rm -f {} +
+          echo "Symbolische Links entfernt: $count"
+          if [ -n "$(find pr -path pr/.git -prune -o -type l -print -quit)" ]; then
+            echo "Im Checkout liegt noch ein symbolischer Link. Das Review läuft so nicht."
+            exit 1
+          fi
 
       - name: Node einrichten
         uses: actions/setup-node@v7
